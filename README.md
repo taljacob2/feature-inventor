@@ -22,14 +22,20 @@ npm install
 npm run build
 ```
 
-Then check on the project:
+Then check on the project — no extra setup needed:
+
+```sh
+node dist/cli.js status
+# or: npm start -- status
+```
+
+If you'd rather run the bare `feature-inventor` command instead, register it
+on your PATH once with `npm install -g .` (or `npm link`) from the repo
+root; that's an optional convenience, not something the project requires.
 
 ```sh
 feature-inventor status
 ```
-
-(Or, without installing the `bin` globally: `node dist/cli.js status`, or
-`npm start -- status` during development.)
 
 `status` prints:
 - **Last run** — where the most recent run left off: confirmation nothing
