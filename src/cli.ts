@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseBacklogCounts, parseChangelogEntries, parseNowSection, type BacklogCounts } from "./roadmap.js";
 import { parseFeatureLogEntries, type FeatureLogEntry } from "./feature-log.js";
@@ -241,6 +241,30 @@ export function runRecap(
   }
 }
 
+const USAGE = "Usage: feature-inventor [status [--json] | recap [--since DATE|--all] [--peek] | stop [--cancel] | --help | --version]";
+
+/**
+ * Prints usage/description and exits 0. Shared by the `--help`/`-h` flags
+ * (feature-inventor treats those as top-level commands, not options of
+ * `status`) so `feature-inventor --help` behaves the way users expect from
+ * virtually every other CLI instead of falling through to "Unknown command".
+ */
+export function printHelp(): void {
+  console.log("feature-inventor — a self-hosted, self-growing nightly feature-building loop.\n");
+  console.log(USAGE);
+}
+
+/**
+ * Prints the version from package.json and exits 0. repoRoot defaults to the
+ * package root (one directory up from this compiled file in dist/) so it
+ * works regardless of the caller's current working directory.
+ */
+export function printVersion(packageRoot: string = join(dirname(fileURLToPath(import.meta.url)), "..")): void {
+  const raw = readRequiredFile(packageRoot, "package.json");
+  const parsed = JSON.parse(raw) as { version?: string };
+  console.log(parsed.version ?? "unknown");
+}
+
 function main(): void {
   const [, , command, ...rest] = process.argv;
 
@@ -257,11 +281,17 @@ function main(): void {
     case "stop":
       runStop(process.cwd(), { cancel: rest.includes("--cancel") });
       break;
+    case "--help":
+    case "-h":
+      printHelp();
+      break;
+    case "--version":
+    case "-v":
+      printVersion();
+      break;
     default:
       console.error(`Unknown command: ${command}`);
-      console.error(
-        "Usage: feature-inventor [status [--json] | recap [--since DATE|--all] [--peek] | stop [--cancel]]",
-      );
+      console.error(USAGE);
       process.exit(1);
   }
 }

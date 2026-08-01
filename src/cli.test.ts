@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { printStatus, runRecap, runStop } from "./cli.js";
+import { printHelp, printStatus, printVersion, runRecap, runStop } from "./cli.js";
 import type { StatusData } from "./cli.js";
 import { STOP_FLAG_FILENAME, parseStopFlag } from "./stop-flag.js";
 import { RECAP_STATE_FILENAME, parseRecapState } from "./recap.js";
@@ -280,6 +280,57 @@ describe("printStatus", () => {
 
     const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
     expect(output).not.toContain("Stop requested");
+  });
+});
+
+describe("printHelp", () => {
+  it("prints a description and usage line", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    printHelp();
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("feature-inventor");
+    expect(output).toContain("Usage: feature-inventor");
+
+    logSpy.mockRestore();
+  });
+});
+
+describe("printVersion", () => {
+  let dir: string;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "feature-inventor-cli-version-test-"));
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it("prints the version field from package.json", () => {
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "x", version: "1.2.3" }));
+
+    printVersion(dir);
+
+    expect(logSpy).toHaveBeenCalledWith("1.2.3");
+  });
+
+  it("defaults to this package's real package.json and prints a semver-looking string", () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code})`);
+    }) as never);
+
+    expect(() => printVersion()).not.toThrow();
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const [output] = logSpy.mock.calls[0] as [string];
+    expect(output).toMatch(/^\d+\.\d+\.\d+/);
+
+    exitSpy.mockRestore();
   });
 });
 

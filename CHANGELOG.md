@@ -31,6 +31,27 @@ Format per entry:
 - Notes from re-evaluation:
 ```
 
+## 2026-08-01 — `--help`/`-h` and `--version`/`-v` flags on the CLI (hand-built)
+
+- Effort/value estimate vs actual: ICE 5/8/9 (composite 7.3) — matched; a
+  handful of added `switch` cases plus two small exported helper functions
+  (`printHelp`, `printVersion`), no architectural risk.
+- Sanity checks: pass — `npm test` (78/78 tests, including 3 new cli.test.ts
+  cases for `printHelp`/`printVersion`) and `npm run build` both green;
+  manually ran `dist/cli.js --help`, `-h`, `--version`, and `-v` and confirmed
+  exit code 0 with the expected usage/version output in each case, and
+  confirmed `dist/cli.js bogus` still exits 1 with "Unknown command".
+- Commit: this commit
+- Notes from re-evaluation: `main()`'s switch previously had no cases for
+  `--help`/`-h`/`--version`/`-v`, so they fell through to the `default` case's
+  "Unknown command" error and exit 1. Added explicit cases: `--help`/`-h` call
+  a new exported `printHelp()` (prints a one-line description plus the usage
+  string) and exit 0 normally; `--version`/`-v` call a new exported
+  `printVersion()`, which reads `version` from `package.json` (resolved
+  relative to the compiled file's own directory via
+  `import.meta.url`/`dirname`, so it works regardless of the caller's cwd)
+  and prints it, also exiting 0 normally.
+
 ## 2026-08-01 — README.md quickstart (hand-built)
 
 - Effort/value estimate vs actual: ICE 4/7/9 (composite 6.7) — matched; pure
