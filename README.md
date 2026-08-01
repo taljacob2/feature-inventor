@@ -75,6 +75,9 @@ npm test
 npm run build
 ```
 
+Working on Feature Inventor itself (not just using it)? See
+`CONTRIBUTING.md`.
+
 ## How a nightly run works
 
 Each run (`workflows/nightly.js`) walks the same loop described in

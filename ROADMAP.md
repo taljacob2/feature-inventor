@@ -10,9 +10,10 @@ rough t-shirt sizes (S/M/L); `workflows/nightly.js` itself now scores
 candidates with real ICE (Impact/Confidence/Ease) per `RESEARCH.md` §3 —
 new items below use ICE where the estimate was made after that switch.
 
-Items marked `[x]` below were hand-built during v0 scaffolding, not shipped
-by the loop — `CHANGELOG.md` stays reserved for loop-shipped work, per its
-own header, so their history lives in this repo's own commits instead.
+Items marked `[x]` are done — see `CHANGELOG.md` for the full story on each
+(tagged `loop-shipped` or `hand-built`, so you can tell which were built
+autonomously). Items that predate CHANGELOG.md itself (initial v0
+scaffolding) aren't in there; see `git log` for that history instead.
 
 ## Now (this run's candidates, cheapest first)
 
@@ -25,8 +26,7 @@ own header, so their history lives in this repo's own commits instead.
 - [x] README.md quickstart — shipped this run, commit `8d45988`.
 - [x] `status --json` machine-readable output mode — shipped this run, commit `a7f8887`.
 - [ ] Retry: backlog section counts (Next/Later/Horizon) in `status` — S/S — ICE re-estimated 6/4/8 (Confidence down from 7): a prior attempt (`98fd48d`) was reverted (`aa35e1d`) because the reused `\b`-bounded heading regex matches `## Next Steps` as `## Next` (false match, first-match-wins), the CHANGELOG entry claimed this couldn't happen, and the new test written to cover exactly that case omitted the colliding heading from its own fixture so it passed without testing the claim; retry must fix `parseSection` to require the heading line end (or an explicit separator) after the name rather than a bare word boundary, and must add a fixture that actually contains a colliding heading like `## Next Steps` next to a real `## Next` section, asserting the right one is picked.
-- [x] `feature-inventor stop` [--cancel] and `feature-inventor recap` [--since DATE|--all] [--peek] CLI commands, plus a stop-flag check wired into `workflows/nightly.js`'s Implement loop (checked between features, so one already in progress still finishes/verifies/logs normally) — done, hand-built. `status` also now surfaces a pending stop request. Treated as control/safety plumbing rather than a loop-invented feature — VISION.md's "loop invents its own UX" principle is being applied loosely while the platform itself is still being scaffolded.
-- [x] Fixed a latent bug in `workflows/nightly.js`: `appendFeatureLogEntry` called `node:fs/promises` directly from the orchestrating script body, but Workflow scripts have no filesystem access — only the agents they spawn do (per the Workflow tool's own documented constraints). This was never caught because the loop has still never actually executed through real automation (see the corrected `CronCreate` item below) — confirmed empirically: `feature-log.jsonl` does not exist on disk despite CHANGELOG.md/ROADMAP.md narrating a completed run. Replaced with a delegated agent call; the new stop-flag check/clear use the same pattern.
+- [x] `feature-inventor stop`/`feature-inventor recap` CLI commands, a graceful stop-flag check in `workflows/nightly.js`, three slash commands, and a fix for `appendFeatureLogEntry`'s Workflow-script filesystem-access bug — see `CHANGELOG.md` 2026-08-01 (hand-built), commit `c27022a`.
 
 ## Next
 
