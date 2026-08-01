@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -538,7 +538,27 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+/**
+ * Whether this module was invoked directly (as the CLI entry point) rather
+ * than merely imported (e.g. by cli.test.ts). Comparing raw paths here is
+ * not enough: `import.meta.url` always resolves through symlinks to this
+ * file's real location, but `process.argv[1]` does not -- when invoked via
+ * an `npm link`-installed global command (itself a symlink), argv[1] is the
+ * symlink path, not the real one, so a strict `===` silently never matches
+ * and `main()` never runs (confirmed: exit code 0, zero output, no error --
+ * the exact bug this fixes). `realpathSync` resolves argv[1]'s symlinks
+ * first so the comparison works regardless of how the command was reached.
+ */
+function isMainModule(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    return fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   main().catch((err) => {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
