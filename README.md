@@ -36,6 +36,37 @@ feature-inventor status
 - **Recently shipped** — the last few entries from `CHANGELOG.md`.
 - **Recent feature attempts** — the last few records from `feature-log.jsonl`
   (title, ICE score, and outcome), once the loop has run at least once.
+- Whether a graceful stop is currently pending (see below).
+
+Add `--json` for machine-readable output (same data, no section headers).
+
+### Recap: "while you were sleeping"
+
+```sh
+feature-inventor recap
+```
+
+Summarizes what shipped, was abandoned, or was reverted since the last time
+you ran `recap` (it remembers a watermark date locally, gitignored, not
+committed). `--all` shows the full history instead; `--peek` previews without
+moving the watermark; `--since YYYY-MM-DD` picks an explicit start date.
+
+### Stopping a run gracefully
+
+```sh
+feature-inventor stop
+```
+
+Asks a running (or about-to-run) nightly loop to wrap up early: it finishes
+whatever feature it's currently implementing/verifying, skips starting
+another one, still updates `ROADMAP.md`/`CHANGELOG.md`, then exits. This is
+not a hard kill — nothing in progress gets cut off mid-write. Run
+`feature-inventor stop --cancel` to undo a pending request before it takes
+effect; `status` shows whether one is currently pending.
+
+If you're using Claude Code directly, `/feature-inventor-status`,
+`/feature-inventor-recap`, and `/feature-inventor-stop` wrap these same
+commands as slash commands (see `.claude/commands/`).
 
 Run the test suite and type-check the same way the loop does:
 

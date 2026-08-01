@@ -1,2 +1,4 @@
 node_modules/
 dist/
+.feature-inventor-stop
+.feature-inventor-recap-state.json
