@@ -285,10 +285,24 @@ export function runRecap(
   }
 }
 
+// This is deliberately explicit about "do not ask for confirmation," not
+// just "run unattended" — found the hard way: the /feature-inventor-start
+// skill (which this would otherwise naturally reach for) has its own
+// interactive "Ready to launch? 1. Yes / 2. Customize / 3. Cancel"
+// confirmation step. --dangerously-skip-permissions bypasses Claude Code's
+// permission prompts, but that confirmation isn't a permission prompt --
+// it's the skill's own designed UX, and it deadlocks forever with nobody
+// present to answer it (confirmed live: a real daemon-spawned run sat
+// blocked on exactly this). Telling it to skip that skill and invoke the
+// Workflow tool directly avoids the deadlock at the source.
 const DAEMON_RUN_PROMPT =
-  "Run the feature-inventor nightly workflow: read workflows/nightly.js in this repo and invoke it " +
-  "via the Workflow tool with its default args (none needed). The current working directory is " +
-  "already this repo's root.";
+  "Run the feature-inventor nightly workflow, right now, with no pauses: invoke the Workflow tool " +
+  "directly against workflows/nightly.js with its default args (none needed). The current working " +
+  "directory is already this repo's root. This is an unattended, non-interactive invocation -- " +
+  "nobody is present to answer questions or confirm anything, ever. Do not use /feature-inventor-start " +
+  "or any other skill/command that asks for confirmation before proceeding -- that will hang forever " +
+  "with no one able to respond. Do not ask for confirmation yourself either. Just invoke the Workflow " +
+  "tool immediately with default args.";
 
 const DEFAULT_DAEMON_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours -- generous; a real run took ~21 minutes.
 const DEFAULT_DAEMON_POLL_MS = 60 * 1000; // check for completion once a minute while a run is in flight

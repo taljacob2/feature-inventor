@@ -21,3 +21,10 @@ Remind the user of the safety boundary while this runs: the loop only ever commi
 review and merge. When it finishes, point the user at `feature-inventor recap` (or
 `/feature-inventor-recap`) to see what happened, and `git log nightly` / `git diff main...nightly` to
 review the actual changes before merging anything.
+
+This skill assumes a human is present to answer its confirmation questions above. Confirmed live
+(2026-08-02): a `feature-inventor daemon`-spawned headless run reached for this skill and deadlocked
+forever waiting for an answer nobody could give — `--dangerously-skip-permissions` bypasses Claude
+Code's permission prompts, not this skill's own confirmation step. `feature-inventor daemon`'s spawn
+prompt now explicitly tells it to skip this skill and invoke the `Workflow` tool directly instead; if
+you're invoking this skill from any other unattended/non-interactive context, do the same.
