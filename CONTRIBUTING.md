@@ -9,7 +9,7 @@ shipped*, see `CHANGELOG.md`.
 
 | Path | What it is |
 |---|---|
-| `src/*.ts` | The CLI (`cli.ts`) and its pure parsing logic (`roadmap.ts`, `feature-log.ts`, `recap.ts`, `stop-flag.ts`). Each has a matching `*.test.ts`. |
+| `src/*.ts` | The CLI (`cli.ts`) and its pure parsing logic (`roadmap.ts`, `feature-log.ts`, `calibration.ts`, `autonomy.ts`, `run-summary.ts`, `daemon.ts`, `recap.ts`, `stop-flag.ts`). Each has a matching `*.test.ts`. |
 | `workflows/nightly.js` | The nightly loop itself — a **Workflow-tool script**, not a plain Node file. See below. |
 | `.claude/commands/*.md` | Claude Code slash commands: `status`/`recap`/`stop` wrap the CLI; `start` is a shortcut for asking Claude to invoke the `Workflow` tool directly (the CLI itself can't — see below). |
 | `ROADMAP.md` | The backlog: what's planned, in progress, or done. |
@@ -50,12 +50,13 @@ knowing before you edit it:
 - **No `Date.now()`/`Math.random()`/bare `new Date()`** in the script body.
 - **There is no automated test harness for this file.** The only way to
   validate a change is to actually invoke it through the `Workflow` tool
-  and read what happened. As of this writing, `workflows/nightly.js` has
-  still never executed through real automation — confirmed by an empty
-  `TaskList`/`CronList` and no `feature-log.jsonl` on disk. A manual dry
-  run through the `Workflow` tool is the natural way to validate a change
-  here, and is explicitly the gate before `CronCreate` gets wired for
-  unattended runs (see `ROADMAP.md`'s `CronCreate` item).
+  and read what happened. It has now executed for real at least once
+  (2026-08-01: 3 features shipped and independently verified, 4 candidates
+  carried forward, `feature-log.jsonl` and `.feature-inventor-last-run.json`
+  both genuinely produced by that run — see `CHANGELOG.md`) — but a single
+  successful run doesn't mean every future change here is automatically
+  safe; still validate changes with a real dry run through the `Workflow`
+  tool, not just by reading the diff.
 - **Nothing in this file should be hardcoded to one machine.** It used to
   hardcode an absolute Windows path as `REPO_ROOT`; that's fixed now —
   `resolveRepoRoot()` auto-detects via `git rev-parse --show-toplevel` and
@@ -70,6 +71,48 @@ error out with an explanation rather than silently doing the wrong thing,
 since `"pr-per-feature"` in particular would require pushing to a remote,
 conflicting with the never-push safety boundary until a human decides
 otherwise).
+
+## Running the daemon (`feature-inventor daemon`)
+
+`src/daemon.ts` holds the pure decision logic (is a run due, given the
+interval and the last run's timestamp; the log format) — fully unit tested.
+The actual spawn/poll orchestration lives in `cli.ts`'s `runDaemonCycleIfDue`/
+`runDaemon` and isn't unit tested, for the same reason `workflows/nightly.js`
+isn't: it spawns a real `claude` process and waits on real wall-clock time.
+
+Design notes worth knowing before touching this:
+
+- **The spawned process's exit is never trusted as proof a run finished.**
+  The `Workflow` tool returns immediately and finishes its spawned agents
+  later — confirmed by this project's own first real run — and whether a
+  headless `claude --bg` invocation's process lifetime spans that later
+  completion isn't verified either way. The authoritative signal is
+  `.feature-inventor-last-run.json`'s `completedAt` actually advancing past
+  the cycle's start time; `claude --bg`'s own exit is just logged for
+  diagnostics.
+- **This is feature-inventor's own scheduler, deliberately not the OS's and
+  deliberately not Claude Code's `CronCreate`.** `CronCreate` jobs are
+  session-only (gone if the Claude Code session ends), auto-expire after 7
+  days, and only fire while idle — none of which fits "runs for months." An
+  OS-level scheduler would survive a reboot, which this doesn't (yet) —
+  registering auto-start-on-boot is a known, deliberately-deferred
+  follow-up, not an oversight.
+- **`--yolo`/`--unattended` passes `--dangerously-skip-permissions`** to the
+  spawned `claude` invocation — bypasses every permission check for that
+  run. Real, documented, opt-in; don't make it the default.
+- **Testing this live is genuinely risky, not just inconvenient.** Trying to
+  intercept the `claude` binary via a `PATH` override to test with a fake
+  stand-in failed twice while building this (Windows resolves `claude`
+  through a mechanism `child_process.spawn` doesn't respect PATH
+  overrides for), each time silently dispatching a real background session
+  instead of the fake. If you need to test the spawn/poll path again, treat
+  it as dispatching a real session — check `claude agents --json` and
+  `claude stop <id>` it afterward — rather than trusting a PATH override
+  actually redirected anything.
+
+One-time setup for actually running this unattended: `claude setup-token`
+sets up a long-lived auth token so a scheduled run doesn't need an
+interactive login each time.
 
 ## Recording what shipped
 

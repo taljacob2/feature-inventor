@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,7 @@ import {
   parseRecapState,
   serializeRecapState,
 } from "./recap.js";
+import { DAEMON_LOG_FILENAME, appendDaemonLogEntries, isRunDue, parseIntervalToMs, type DaemonLogEntry } from "./daemon.js";
 
 function readRequiredFile(repoRoot: string, filename: string): string {
   try {
@@ -273,8 +275,152 @@ export function runRecap(
   }
 }
 
+const DAEMON_RUN_PROMPT =
+  "Run the feature-inventor nightly workflow: read workflows/nightly.js in this repo and invoke it " +
+  "via the Workflow tool with its default args (none needed). The current working directory is " +
+  "already this repo's root.";
+
+const DEFAULT_DAEMON_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours -- generous; a real run took ~21 minutes.
+const DEFAULT_DAEMON_POLL_MS = 60 * 1000; // check for completion once a minute while a run is in flight
+const DEFAULT_DAEMON_CHECK_MS = 5 * 60 * 1000; // how often to check whether a new run is due
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function appendDaemonLog(repoRoot: string, entry: DaemonLogEntry): void {
+  const existing = readOptionalFile(repoRoot, DAEMON_LOG_FILENAME) ?? "";
+  writeFileSync(join(repoRoot, DAEMON_LOG_FILENAME), appendDaemonLogEntries(existing, [entry]), "utf8");
+}
+
+export interface DaemonOptions {
+  /** How often a new run should be attempted, e.g. from parseIntervalToMs("24h"). */
+  intervalMs: number;
+  /** Passes --dangerously-skip-permissions to the spawned headless run. Bypasses ALL permission checks. */
+  yolo?: boolean;
+  /** Max time to wait for a spawned run to actually finish before giving up on that cycle. */
+  timeoutMs?: number;
+  /** How often to check .feature-inventor-last-run.json for completion while a run is in flight. */
+  pollMs?: number;
+  /** How often to check whether a new run is due, between cycles. */
+  checkMs?: number;
+  /** Run at most one cycle and return, instead of looping forever — for manual testing. */
+  once?: boolean;
+}
+
+/**
+ * Runs one cycle if a new run is due: spawns a headless Claude Code
+ * invocation (`claude --bg`) and waits for it to actually finish, logging
+ * the outcome. Returns null if no run was due this cycle.
+ *
+ * The spawned process's own exit is deliberately NOT treated as proof the
+ * nightly run completed — the Workflow tool returns immediately and
+ * finishes its spawned agents later (confirmed by this project's own first
+ * real run), and whether a headless `--bg` invocation's process lifetime
+ * spans that later completion hasn't been verified. The authoritative
+ * signal is `.feature-inventor-last-run.json`'s `completedAt` actually
+ * advancing past this cycle's start time — the same file
+ * `workflows/nightly.js`'s Finalize phase already writes on every real run.
+ */
+export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptions): Promise<DaemonLogEntry | null> {
+  const runSummaryContent = readOptionalFile(repoRoot, RUN_SUMMARY_FILENAME);
+  const lastRun = runSummaryContent ? parseRunSummary(runSummaryContent) : null;
+
+  if (!isRunDue(Date.now(), lastRun ? lastRun.completedAt : null, options.intervalMs)) {
+    return null;
+  }
+
+  const startedAt = new Date().toISOString();
+  console.log(`[daemon] ${startedAt} — a run is due, starting one.`);
+
+  const claudeArgs = ["--bg"];
+  if (options.yolo) claudeArgs.push("--dangerously-skip-permissions");
+  claudeArgs.push(DAEMON_RUN_PROMPT);
+
+  const spawnError = await new Promise<string | null>((resolve) => {
+    const child = spawn("claude", claudeArgs, { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => (output += chunk.toString()));
+    child.stderr?.on("data", (chunk: Buffer) => (output += chunk.toString()));
+    child.on("error", (err) => resolve(err instanceof Error ? err.message : String(err)));
+    child.on("exit", (code) => {
+      console.log(`[daemon] claude --bg exited (code ${code}). Output: ${output.trim() || "(none)"}`);
+      resolve(null);
+    });
+  });
+
+  if (spawnError) {
+    const entry: DaemonLogEntry = {
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      outcome: "spawn-error",
+      detail: spawnError,
+    };
+    appendDaemonLog(repoRoot, entry);
+    console.log(`[daemon] Failed to spawn claude: ${spawnError}`);
+    return entry;
+  }
+
+  const timeoutMs = options.timeoutMs ?? DEFAULT_DAEMON_TIMEOUT_MS;
+  const pollMs = options.pollMs ?? DEFAULT_DAEMON_POLL_MS;
+  const deadline = Date.now() + timeoutMs;
+  const startedAtMs = Date.parse(startedAt);
+
+  while (Date.now() < deadline) {
+    await sleep(pollMs);
+    const content = readOptionalFile(repoRoot, RUN_SUMMARY_FILENAME);
+    const summary = content ? parseRunSummary(content) : null;
+    if (summary && Date.parse(summary.completedAt) >= startedAtMs) {
+      const entry: DaemonLogEntry = { startedAt, finishedAt: new Date().toISOString(), outcome: "completed" };
+      appendDaemonLog(repoRoot, entry);
+      console.log(
+        `[daemon] Run completed: ${summary.shipped.length} shipped, ${summary.abandoned.length} abandoned, ` +
+          `${summary.notAttempted.length} not attempted.`,
+      );
+      return entry;
+    }
+  }
+
+  const entry: DaemonLogEntry = {
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    outcome: "timed-out",
+    detail: `no ${RUN_SUMMARY_FILENAME} update within ${timeoutMs}ms`,
+  };
+  appendDaemonLog(repoRoot, entry);
+  console.log(`[daemon] Timed out waiting for the run to complete after ${timeoutMs}ms — will try again next cycle.`);
+  return entry;
+}
+
+/**
+ * Long-running loop: checks whether a run is due every `checkMs`, and when
+ * one is, spawns and waits for it via runDaemonCycleIfDue. This is
+ * feature-inventor's own scheduler — deliberately not the OS's cron/Task
+ * Scheduler (simpler to set up, no OS-specific configuration) and
+ * deliberately not Claude Code's CronCreate (session-only, no persistence
+ * across a restart, and auto-expires after 7 days — see the conversation
+ * this was designed from). The tradeoff: this process itself must keep
+ * running for the schedule to fire at all; unlike an OS scheduler, a reboot
+ * or a killed process silently ends things until it's started again. See
+ * CONTRIBUTING.md for the planned follow-up (registering auto-start on boot).
+ */
+export async function runDaemon(repoRoot: string, options: DaemonOptions): Promise<void> {
+  console.log(
+    `[daemon] Starting. Checking every ${options.checkMs ?? DEFAULT_DAEMON_CHECK_MS}ms whether a run is due ` +
+      `(interval: ${options.intervalMs}ms).` +
+      (options.yolo ? " Unattended mode (--yolo): permission checks bypassed for spawned runs." : ""),
+  );
+
+  for (;;) {
+    await runDaemonCycleIfDue(repoRoot, options);
+    if (options.once) return;
+    await sleep(options.checkMs ?? DEFAULT_DAEMON_CHECK_MS);
+  }
+}
+
 const USAGE =
-  "Usage: feature-inventor [status [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | --help | --version]";
+  "Usage: feature-inventor [status [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "daemon [--every DURATION] [--yolo] [--once] | --help | --version]";
 
 /**
  * Prints usage/description and exits 0. Shared by the `--help`/`-h` flags
@@ -298,7 +444,7 @@ export function printVersion(packageRoot: string = join(dirname(fileURLToPath(im
   console.log(parsed.version ?? "unknown");
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
 
   switch (command ?? "status") {
@@ -319,6 +465,19 @@ function main(): void {
     case "stop":
       runStop(process.cwd(), { cancel: rest.includes("--cancel") });
       break;
+    case "daemon": {
+      const everyIndex = rest.indexOf("--every");
+      const pollIndex = rest.indexOf("--poll");
+      const timeoutIndex = rest.indexOf("--timeout");
+      await runDaemon(process.cwd(), {
+        intervalMs: parseIntervalToMs(everyIndex !== -1 ? rest[everyIndex + 1] : "24h"),
+        pollMs: pollIndex !== -1 ? parseIntervalToMs(rest[pollIndex + 1]!) : undefined,
+        timeoutMs: timeoutIndex !== -1 ? parseIntervalToMs(rest[timeoutIndex + 1]!) : undefined,
+        yolo: rest.includes("--yolo") || rest.includes("--unattended"),
+        once: rest.includes("--once"),
+      });
+      break;
+    }
     case "--help":
     case "-h":
       printHelp();
@@ -335,5 +494,8 @@ function main(): void {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main();
+  main().catch((err) => {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  });
 }

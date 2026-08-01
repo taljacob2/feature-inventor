@@ -584,7 +584,9 @@ Rules (see VISION.md operating principles):
   reference "this commit" since the sha isn't knowable before committing), and commit everything
   (code + tests + changelog entry) in a single git commit on "${BRANCH_NAME}" with a clear message.
   Report the resulting commit sha — it will be independently re-verified by another agent, so it
-  must be accurate.
+  must be accurate. Tag the CHANGELOG entry "(loop-shipped)", not "(hand-built)" — you are
+  workflows/nightly.js running unattended right now, which is exactly what that tag means; do not
+  default to "(hand-built)" just because it's the more common existing tag in the file's history.
 - Do not modify ROADMAP.md yourself — a later step reconciles the whole roadmap at once from every
   feature attempted this run.
 - Do not push to any remote.

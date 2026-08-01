@@ -13,9 +13,14 @@ This is the one place a human reads each morning to answer "what happened
 while I was asleep" — see also `feature-inventor recap`, which reads the
 same underlying history (`feature-log.jsonl`) back as a short summary.
 
-As of this writing, every entry below is `(hand-built)`:
-`workflows/nightly.js` has not yet actually executed through the Workflow
-tool (see `ROADMAP.md`'s `CronCreate` item for how we know that). Entries
+`workflows/nightly.js` executed for real for the first time on 2026-08-01
+(see the three `(loop-shipped)` entries dated that day); everything before
+that run is `(hand-built)`. Correction, also 2026-08-01: that run's own
+Implement-phase agents initially tagged all three of their own entries
+`(hand-built)` instead of `(loop-shipped)` — `workflows/nightly.js`'s prompt
+never actually told them which tag applied to their own work, so they
+defaulted to the wrong one. Fixed both the three entries and the prompt (see
+`ROADMAP.md`/this file's `feature-inventor daemon` entry below). Entries
 from before this file existed — the initial v0 scaffolding — aren't
 backfilled here, to avoid inventing effort/value estimates that were never
 actually recorded; see `ROADMAP.md`'s `[x]` items and `git log` for that
@@ -31,7 +36,7 @@ Format per entry:
 - Notes from re-evaluation:
 ```
 
-## 2026-08-01 — `feature-inventor recap --json` (hand-built)
+## 2026-08-01 — `feature-inventor recap --json` (loop-shipped)
 
 - Effort/value estimate vs actual: ICE 4/8/9 (composite 7.0) — matched;
   `buildRecap()` already returned a plain, JSON-serializable `RecapData`
@@ -50,7 +55,7 @@ Format per entry:
   same regardless of output mode. Updated `USAGE` and README to document the
   new flag.
 
-## 2026-08-01 — Preview upcoming Next-section titles in `status` when Now is empty (hand-built)
+## 2026-08-01 — Preview upcoming Next-section titles in `status` when Now is empty (loop-shipped)
 
 - Effort/value estimate vs actual: ICE 7/7/8 (composite 7.3) — matched; the
   needed section-parsing logic (`parseSection`, already used for
@@ -75,7 +80,7 @@ Format per entry:
   sections genuinely empty). `--json` output carries `nextPreview` the same
   way as the other `StatusData` fields, so both output modes stay in sync.
 
-## 2026-08-01 — `--help`/`-h` and `--version`/`-v` flags on the CLI (hand-built)
+## 2026-08-01 — `--help`/`-h` and `--version`/`-v` flags on the CLI (loop-shipped)
 
 - Effort/value estimate vs actual: ICE 5/8/9 (composite 7.3) — matched; a
   handful of added `switch` cases plus two small exported helper functions
@@ -191,3 +196,9 @@ Format per entry:
 - Sanity checks: pass — `npm test` (75/75, unaffected — this is entirely a `workflows/nightly.js` change) and `npm run build` both green; syntax-checked with the same temporary-wrapper `node --check` trick. Additionally, since `orderByIceTierThenMinimalCollision`/`collisionRateBetween` are pure deterministic functions, copied them into a throwaway script and ran three hand-constructed scenarios (no collision data preserves ICE-only order; a same-tier pair with a reported high collision rate doesn't get placed adjacent when a lower-collision alternative exists; a three-way same-tier case picks the lowest-collision neighbor at each greedy step) — all three matched the expected ordering before this was inlined into `nightly.js`, which has no automated test harness of its own.
 - Commit: this commit
 - Notes from re-evaluation: Added a `COLLISION_SCHEMA` and a Prioritize-phase agent call (only when more than one feature was kept) that estimates a 0-100 pairwise "feature collision rate" for every distinct pair of kept candidates — predicted file/logic overlap, not anything actually executed. `orderByIceTierThenMinimalCollision()` then replaces the old plain ICE sort: features are grouped into tiers by ICE composite score rounded to the nearest 0.5 (so a lower-ICE feature never jumps ahead of a meaningfully higher-ICE one, preserving `VISION.md` operating principle #1), and within a tier the queue is built greedily by picking whichever remaining feature has the lowest predicted collision with whatever was placed immediately before it. This is deliberately the *scoring and ordering* half of the ROADMAP.md item only — the Implement loop stays strictly sequential; actually running low-collision features in parallel (via the `Workflow` tool's `isolation: 'worktree'` option, already noted as the ready-made mechanism for it) is left for later, since the item's own text says the parallelize-vs-sequential thresholds need real calibration data that doesn't exist yet. An unreported or missing pair is treated as zero collision rather than blocking ordering on incomplete data.
+
+## 2026-08-01 — `feature-inventor daemon`; fixed a real CHANGELOG mistagging bug (hand-built)
+- Effort/value estimate vs actual: not ICE-scored in advance — designed directly from a conversation about long-term unattended operation, not picked off the ranked backlog. In hindsight, roughly 7/6/6 (composite ~6.3): real value for anyone wanting extended unattended runs, moderate confidence (the spawn/poll orchestration couldn't be safely tested against the real `claude` binary — see below), moderate effort.
+- Sanity checks: pass — `npm test` (100/100, including 13 new `src/daemon.test.ts` cases for the pure interval/due/log logic) and `npm run build` both green. The "not due" path was verified for real against this actual repo (`node dist/cli.js daemon --once` correctly did nothing, since the last real run was ~40 minutes prior and the default interval is 24h). The spawn/poll path was verified against a scratch repo with an intended fake `claude` stand-in on `PATH` — but the override didn't take effect (Windows resolves `claude` through a mechanism `child_process.spawn` doesn't respect `PATH` overrides for), so it accidentally dispatched two real background Claude Code sessions against the scratch directory instead. Both were caught via `claude agents --json`, manually stopped with `claude stop <id>`, and are documented in `CONTRIBUTING.md` as a warning for next time. The accidental runs did, incidentally, validate the timeout/logging path for real: each one spawned correctly, was correctly not mistaken for a completed run, and correctly timed out and logged after 30s with an accurate detail message.
+- Commit: this commit
+- Notes from re-evaluation: Added `src/daemon.ts` (pure: `parseIntervalToMs`, `isRunDue`, daemon-log serialize/append/parse) and `cli.ts`'s `runDaemonCycleIfDue`/`runDaemon` (spawns `claude --bg [--dangerously-skip-permissions] "<prompt>"`, then polls `.feature-inventor-last-run.json` — not the spawned process's own exit — for proof a run actually finished, since the `Workflow` tool returns before its spawned agents do and whether a headless `--bg` invocation's lifetime spans that isn't verified). New `feature-inventor daemon [--every DURATION] [--yolo|--unattended] [--once] [--poll DURATION] [--timeout DURATION]` command. This is feature-inventor's own scheduler, deliberately not `CronCreate` (session-only, gone if the session ends, auto-expires after 7 days — not a fit for "runs for months") and deliberately not the OS's own scheduler (no OS-specific setup needed, at the cost of not surviving a reboot yet — see `ROADMAP.md`). Separately, while writing this entry, found that the three `(loop-shipped)` entries above (from today's actual first real automated run) had been mistagged `(hand-built)` by that run's own Implement-phase agents — `workflows/nightly.js`'s prompt told them to append a CHANGELOG entry "following its documented format" but never actually told them which tag applied to their own output, so they defaulted to the far more common existing tag in the file's history. Fixed the three entries, the intro paragraph's stale "not yet executed" claim, and the prompt itself (now explicitly: tag your own entries "(loop-shipped)", don't default to "(hand-built)"). Also: this entry's own `node --check` verification during earlier `nightly.js` changes tonight used a wrapper that put the file's `export const meta = {...}` inside a function body — which is unconditionally invalid JS grammar, so those checks were silently not validating anything. The real Workflow-tool execution tonight is much stronger evidence those versions were valid than a broken local check ever was; the wrapper is fixed now (keep `export` at real top level via a `.mjs` extension, wrap only the rest) and used correctly for this change.

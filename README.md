@@ -100,8 +100,37 @@ program and only the `Workflow` tool can actually execute
 ("run the nightly workflow") and it'll invoke the `Workflow` tool itself;
 `/feature-inventor-start` is a convenience shortcut for the same thing
 (optionally passing `maxFeatures`/`branchName`/`repoRoot`), not the only way
-to do it. Unattended scheduling via `CronCreate` is a separate, not-yet-wired
-path — see `ROADMAP.md`.
+to do it.
+
+### Running unattended for extended periods
+
+```sh
+claude setup-token          # one-time: long-lived auth so scheduled runs don't need an interactive login
+feature-inventor daemon --every 12h --yolo
+```
+
+`feature-inventor daemon` is a long-running process that decides on its own
+when a run is due (based on `.feature-inventor-last-run.json`'s timestamp)
+and spawns a headless Claude Code invocation (`claude --bg`) to actually run
+it, waiting for it to genuinely finish before considering that cycle done.
+This is feature-inventor's *own* scheduler — not the OS's cron/Task
+Scheduler (no OS-specific setup needed) and not Claude Code's `CronCreate`
+(which is session-only, gone if that session ends, and auto-expires after 7
+days — not a fit for "runs for months").
+
+- `--every DURATION` — how often to attempt a run (e.g. `12h`, `1d`); default `24h`.
+- `--yolo` (or `--unattended`) — bypasses Claude Code's permission prompts
+  for the spawned runs (`--dangerously-skip-permissions` under the hood).
+  This is a real trust decision — the spawned session can read/write files
+  and run shell commands with nothing asking you to confirm — appropriate
+  for this project's explicitly autonomous premise, but worth knowing what
+  it actually does rather than just treating it as a fun flag name.
+- `--once` — run at most one cycle then exit, useful for testing.
+
+**Known limitation**: this process itself has to keep running for the
+schedule to fire at all — unlike an OS scheduler, a reboot or a killed
+process silently ends things until you start it again. Registering
+auto-start-on-boot is planned but not built yet (see `ROADMAP.md`).
 
 Run the test suite and type-check the same way the loop does:
 

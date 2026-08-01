@@ -3,4 +3,5 @@ dist/
 .feature-inventor-stop
 .feature-inventor-recap-state.json
 .feature-inventor-last-run.json
+.feature-inventor-daemon.log.jsonl
 feature-log.jsonl
