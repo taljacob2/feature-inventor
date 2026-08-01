@@ -56,6 +56,15 @@ knowing before you edit it:
   run through the `Workflow` tool is the natural way to validate a change
   here, and is explicitly the gate before `CronCreate` gets wired for
   unattended runs (see `ROADMAP.md`'s `CronCreate` item).
+- **Nothing in this file should be hardcoded to one machine.** It used to
+  hardcode an absolute Windows path as `REPO_ROOT`; that's fixed now —
+  `resolveRepoRoot()` auto-detects via `git rev-parse --show-toplevel` and
+  confirms `package.json`'s `name` before trusting it, or takes an explicit
+  `args.repoRoot` override. Don't reintroduce a literal path if you touch
+  this again.
+
+The workflow accepts optional `args`: `repoRoot` (explicit path override),
+`branchName` (default `"nightly"`), `maxFeatures` (default `3`).
 
 ## Recording what shipped
 

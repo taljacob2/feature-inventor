@@ -27,6 +27,7 @@ scaffolding) aren't in there; see `git log` for that history instead.
 - [x] `status --json` machine-readable output mode — shipped this run, commit `a7f8887`.
 - [ ] Retry: backlog section counts (Next/Later/Horizon) in `status` — S/S — ICE re-estimated 6/4/8 (Confidence down from 7): a prior attempt (`98fd48d`) was reverted (`aa35e1d`) because the reused `\b`-bounded heading regex matches `## Next Steps` as `## Next` (false match, first-match-wins), the CHANGELOG entry claimed this couldn't happen, and the new test written to cover exactly that case omitted the colliding heading from its own fixture so it passed without testing the claim; retry must fix `parseSection` to require the heading line end (or an explicit separator) after the name rather than a bare word boundary, and must add a fixture that actually contains a colliding heading like `## Next Steps` next to a real `## Next` section, asserting the right one is picked.
 - [x] `feature-inventor stop`/`feature-inventor recap` CLI commands, a graceful stop-flag check in `workflows/nightly.js`, three slash commands, and a fix for `appendFeatureLogEntry`'s Workflow-script filesystem-access bug — see `CHANGELOG.md` 2026-08-01 (hand-built), commit `c27022a`.
+- [x] Removed the hardcoded machine-specific absolute path from `workflows/nightly.js`'s `REPO_ROOT` (and made `BRANCH_NAME` configurable too) — see `CHANGELOG.md` 2026-08-01 "Remove hardcoded repo path..." (hand-built).
 
 ## Next
 

@@ -16,8 +16,56 @@ export const meta = {
 // the next, and multiple agents mutating + committing to the same working
 // tree concurrently would race. See VISION.md operating principle #2.
 
-const REPO_ROOT = 'I:/Tal/Code/other/feature-inventor'
-const BRANCH_NAME = 'nightly'
+// Accepted args (all optional):
+//   repoRoot     - explicit absolute path override (see resolveRepoRoot below)
+//   branchName   - defaults to "nightly"
+//   maxFeatures  - defaults to 3
+
+// Resolved at run start rather than hardcoded to one machine's absolute
+// path — this script has no direct filesystem access itself (only the
+// agents it spawns do, see CONTRIBUTING.md), so even "where am I" has to
+// go through an agent() call. args.repoRoot lets a caller (e.g. a future
+// CronCreate schedule, or CI) pin an explicit path instead of relying on
+// the invoking session's working directory; without it, this auto-detects
+// via `git rev-parse --show-toplevel` and verifies package.json actually
+// names this repo, so a wrong-directory invocation fails loudly instead of
+// running git operations against some unrelated repo.
+async function resolveRepoRoot() {
+  if (args && args.repoRoot) return args.repoRoot
+
+  const result = await agent(
+    `Determine the feature-inventor repository's root directory. Run \`git rev-parse --show-toplevel\`
+in the current working directory and report the absolute path it prints (forward slashes, no
+trailing slash). Then confirm this is actually the feature-inventor repo, not some other one: read
+package.json at that path and check its "name" field equals "feature-inventor". If the current
+directory isn't inside a git repo, or that check fails, report success=false with a clear reason in
+"reason" — do not guess a path.`,
+    {
+      schema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          repoRoot: { type: 'string' },
+          reason: { type: 'string' },
+        },
+        required: ['success'],
+      },
+      effort: 'low',
+      label: 'resolve-repo-root',
+    }
+  )
+
+  if (!result || !result.success || !result.repoRoot) {
+    throw new Error(
+      `Could not resolve the feature-inventor repo root (${result && result.reason ? result.reason : 'agent error'}). ` +
+      'Pass it explicitly via args.repoRoot if this run is not invoked with the repo as the working directory.'
+    )
+  }
+  return result.repoRoot
+}
+
+const REPO_ROOT = await resolveRepoRoot()
+const BRANCH_NAME = (args && args.branchName) || 'nightly'
 const MAX_FEATURES_PER_RUN = (args && args.maxFeatures) || 3
 const MAX_ATTEMPTS = MAX_FEATURES_PER_RUN * 3 // allow skipping abandoned candidates without capping throughput
 
