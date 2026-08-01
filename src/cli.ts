@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseChangelogEntries, parseNowSection } from "./roadmap.js";
+import { parseBacklogCounts, parseChangelogEntries, parseNowSection } from "./roadmap.js";
 import { parseFeatureLogEntries } from "./feature-log.js";
 
 function readRequiredFile(repoRoot: string, filename: string): string {
@@ -33,6 +33,7 @@ export function printStatus(repoRoot: string): void {
   const changelog = readRequiredFile(repoRoot, "CHANGELOG.md");
 
   const nowItems = parseNowSection(roadmap);
+  const backlogCounts = parseBacklogCounts(roadmap);
   const recentShipped = parseChangelogEntries(changelog, 5);
 
   console.log("Feature Inventor — status\n");
@@ -43,6 +44,10 @@ export function printStatus(repoRoot: string): void {
   } else {
     for (const item of nowItems) console.log(`  - ${item}`);
   }
+
+  console.log(
+    `\nBacklog — Next: ${backlogCounts.next}, Later: ${backlogCounts.later}, Horizon: ${backlogCounts.horizon}`,
+  );
 
   console.log("\nRecently shipped:");
   if (recentShipped.length === 0) {

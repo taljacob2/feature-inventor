@@ -73,6 +73,42 @@ describe("printStatus", () => {
     expect(logSpy).toHaveBeenCalled();
   });
 
+  it("prints Next/Later/Horizon backlog counts", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      [
+        "# Roadmap",
+        "",
+        "## Now",
+        "",
+        "- [ ] Something — S/S — why",
+        "",
+        "## Next",
+        "",
+        "- [ ] Next item one",
+        "- [ ] Next item two",
+        "",
+        "## Later",
+        "",
+        "- [ ] Later item one",
+        "- [ ] Later item two",
+        "- [ ] Later item three",
+        "",
+        "## Horizon",
+        "",
+        "- [ ] Horizon item one",
+        "- [ ] Horizon item two",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+
+    printStatus(dir);
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("Backlog — Next: 2, Later: 3, Horizon: 2");
+  });
+
   it("shows a placeholder for recent feature attempts when feature-log.jsonl is absent", () => {
     writeFileSync(
       join(dir, "ROADMAP.md"),
