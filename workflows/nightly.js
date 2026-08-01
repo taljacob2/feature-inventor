@@ -124,6 +124,29 @@ committed to git, so deleting it needs no commit. If it doesn't exist, do nothin
   )
 }
 
+// Gitignored, single-record file (see src/run-summary.ts) answering "where
+// did the last run leave off" for `feature-inventor status` — always
+// overwritten with only the most recent run, unlike feature-log.jsonl's
+// append-only full history. Exists specifically so a human checking after a
+// graceful stop (or any early exit) can see plainly that nothing was left
+// mid-feature and which already-researched-and-ICE-scored candidates were
+// carried into ROADMAP.md rather than silently lost. See ROADMAP.md's
+// "Explicit 'where did we stop' / resume-point summary" item.
+const RUN_SUMMARY_PATH = `${REPO_ROOT}/.feature-inventor-last-run.json`
+
+async function writeRunSummary(summaryWithoutTimestamp) {
+  await agent(
+    `Write exactly one JSON object to ${RUN_SUMMARY_PATH} (pretty-printed, 2-space indent),
+overwriting whatever is there already — this file always reflects only the most recent run, not a
+history. The object is this, with a "completedAt" field added set to the current UTC timestamp in
+ISO 8601 (run \`date -u +%Y-%m-%dT%H:%M:%S.000Z\` in Bash if you're unsure of it):
+${JSON.stringify(summaryWithoutTimestamp)}
+Write the given fields exactly as provided; only add "completedAt". This file is gitignored — do
+not commit it. Confirm when done.`,
+    { effort: 'low', phase: 'Finalize', label: 'write-run-summary' }
+  )
+}
+
 // PushNotification (like TaskCreate/TaskUpdate below) is only reachable by a
 // spawned agent, not the script body itself — so a run-completion summary is
 // delegated the same way appendFeatureLogEntry and the stop-flag checks are.
@@ -580,8 +603,15 @@ Do not push to any remote.`,
 
 await clearStopFlagIfPresent()
 
-const runSummary = `Run complete: ${shipped.length} shipped, ${abandoned.length} abandoned, ${notAttempted.length} not attempted.${stopReason ? ` (stopped: ${stopReason})` : ''}`
-log(runSummary)
-await sendRunCompletionNotification(`feature-inventor nightly: ${runSummary}`)
+await writeRunSummary({
+  shipped: shipped.map(s => s.feature.title),
+  abandoned: abandoned.map(a => a.feature.title),
+  notAttempted: notAttempted.map(f => f.title),
+  stopReason,
+})
+
+const runSummaryLine = `Run complete: ${shipped.length} shipped, ${abandoned.length} abandoned, ${notAttempted.length} not attempted.${stopReason ? ` (stopped: ${stopReason})` : ''}`
+log(runSummaryLine)
+await sendRunCompletionNotification(`feature-inventor nightly: ${runSummaryLine}`)
 
 return { shipped, abandoned, reevaluation, stoppedEarly, stopReason, notAttempted: notAttempted.map(f => f.title) }

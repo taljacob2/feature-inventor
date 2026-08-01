@@ -6,6 +6,7 @@ import { printStatus, runRecap, runStop } from "./cli.js";
 import type { StatusData } from "./cli.js";
 import { STOP_FLAG_FILENAME, parseStopFlag } from "./stop-flag.js";
 import { RECAP_STATE_FILENAME, parseRecapState } from "./recap.js";
+import { RUN_SUMMARY_FILENAME, serializeRunSummary } from "./run-summary.js";
 
 describe("printStatus", () => {
   let dir: string;
@@ -214,6 +215,58 @@ describe("printStatus", () => {
     printStatus(dir, { json: true });
     const parsed = JSON.parse(logSpy.mock.calls[0]![0] as string) as StatusData;
     expect(parsed.backlogCounts).toEqual({ next: 2, later: 1, horizon: 3 });
+  });
+
+  it("shows where the last run left off, including carried-forward not-attempted candidates", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+    writeFileSync(
+      join(dir, RUN_SUMMARY_FILENAME),
+      serializeRunSummary({
+        completedAt: "2026-08-01T20:00:00.000Z",
+        shipped: ["Feature A"],
+        abandoned: ["Feature B"],
+        notAttempted: ["Feature C", "Feature D"],
+        stopReason: "explicit-stop",
+      }),
+    );
+
+    printStatus(dir);
+    const textOutput = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(textOutput).toContain("Last run finished 2026-08-01T20:00:00.000Z");
+    expect(textOutput).toContain("a stop was requested");
+    expect(textOutput).toContain("1 shipped, 1 abandoned, 2 not attempted");
+    expect(textOutput).toContain("Not attempted (already researched and ICE-scored, carried into ROADMAP.md): Feature C, Feature D");
+
+    logSpy.mockClear();
+    printStatus(dir, { json: true });
+    const parsed = JSON.parse(logSpy.mock.calls[0]![0] as string) as StatusData;
+    expect(parsed.lastRun).toEqual({
+      completedAt: "2026-08-01T20:00:00.000Z",
+      shipped: ["Feature A"],
+      abandoned: ["Feature B"],
+      notAttempted: ["Feature C", "Feature D"],
+      stopReason: "explicit-stop",
+    });
+  });
+
+  it("omits the last-run section when no run has completed yet", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+
+    printStatus(dir);
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).not.toContain("Last run finished");
+
+    printStatus(dir, { json: true });
+    const parsed = JSON.parse(logSpy.mock.calls[logSpy.mock.calls.length - 1]![0] as string) as StatusData;
+    expect(parsed.lastRun).toBeNull();
   });
 
   it("omits the stop-request notice when no stop is pending", () => {

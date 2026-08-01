@@ -2,3 +2,5 @@ node_modules/
 dist/
 .feature-inventor-stop
 .feature-inventor-recap-state.json
+.feature-inventor-last-run.json
+feature-log.jsonl

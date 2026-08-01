@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseBacklogCounts, parseChangelogEntries, parseNowSection, type BacklogCounts } from "./roadmap.js";
 import { parseFeatureLogEntries, type FeatureLogEntry } from "./feature-log.js";
 import { computeCalibrationStats, type CalibrationStats } from "./calibration.js";
+import { RUN_SUMMARY_FILENAME, parseRunSummary, type RunSummary } from "./run-summary.js";
 import { STOP_FLAG_FILENAME, parseStopFlag, serializeStopFlag } from "./stop-flag.js";
 import {
   RECAP_STATE_FILENAME,
@@ -46,6 +47,8 @@ export interface StatusData {
   calibration: CalibrationStats;
   /** ISO 8601 timestamp if a `feature-inventor stop` request is pending, else null. */
   stopRequestedAt: string | null;
+  /** Where the most recent run left off, or null if no run has completed yet. */
+  lastRun: RunSummary | null;
 }
 
 /**
@@ -74,7 +77,10 @@ export function getStatusData(repoRoot: string): StatusData {
     stopRequestedAt = parsed ? parsed.requestedAt : "(unknown time)";
   }
 
-  return { nowItems, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt };
+  const runSummaryContent = readOptionalFile(repoRoot, RUN_SUMMARY_FILENAME);
+  const lastRun = runSummaryContent ? parseRunSummary(runSummaryContent) : null;
+
+  return { nowItems, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt, lastRun };
 }
 
 export function printStatus(repoRoot: string, options: { json?: boolean } = {}): void {
@@ -85,7 +91,7 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
     return;
   }
 
-  const { nowItems, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt } = data;
+  const { nowItems, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt, lastRun } = data;
 
   console.log("Feature Inventor — status\n");
 
@@ -94,6 +100,26 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
       `Stop requested at ${stopRequestedAt} — the nightly loop will wrap up its current feature ` +
         "and stop before starting another. Run `feature-inventor stop --cancel` to undo.\n",
     );
+  }
+
+  if (lastRun) {
+    const stopNote =
+      lastRun.stopReason === null
+        ? "it worked through its whole queue"
+        : lastRun.stopReason === "explicit-stop"
+          ? "a stop was requested"
+          : "it hit this run's feature cap";
+    console.log(
+      `Last run finished ${lastRun.completedAt} — ${stopNote}, nothing was left mid-feature. ` +
+        `${lastRun.shipped.length} shipped, ${lastRun.abandoned.length} abandoned, ` +
+        `${lastRun.notAttempted.length} not attempted.`,
+    );
+    if (lastRun.notAttempted.length > 0) {
+      console.log(
+        `Not attempted (already researched and ICE-scored, carried into ROADMAP.md): ${lastRun.notAttempted.join(", ")}`,
+      );
+    }
+    console.log("");
   }
 
   console.log(`Up next (${nowItems.length}):`);
