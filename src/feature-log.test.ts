@@ -111,6 +111,16 @@ describe("parseFeatureLogEntries", () => {
     expect(parseFeatureLogEntries(appendFeatureLogEntries("", [SHIPPED_ENTRY]))).toEqual([SHIPPED_ENTRY]);
   });
 
+  it("round-trips an entry with a filesChanged count", () => {
+    const withFilesChanged: FeatureLogEntry = { ...SHIPPED_ENTRY, filesChanged: 4 };
+    expect(parseFeatureLogEntries(appendFeatureLogEntries("", [withFilesChanged]))).toEqual([withFilesChanged]);
+  });
+
+  it("skips an entry with a non-numeric filesChanged", () => {
+    const content = JSON.stringify({ ...SHIPPED_ENTRY, filesChanged: "four" });
+    expect(parseFeatureLogEntries(content)).toEqual([]);
+  });
+
   it("skips blank lines and lines that fail to parse as JSON", () => {
     const content = [
       serializeFeatureLogEntry(SHIPPED_ENTRY),

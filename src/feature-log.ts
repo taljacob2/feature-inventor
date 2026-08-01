@@ -55,6 +55,14 @@ export interface FeatureLogEntry {
   verificationConcerns?: string;
   /** Absent for attempts where the implementing agent never returned a result at all. */
   selfAssessment?: FeatureSelfAssessment;
+  /**
+   * File count from independent verification's `git show --stat` (not the
+   * implementer's own report, which could be inaccurate) — a raw, factual
+   * signal for the harness-vs-dark-factory autonomy score, see
+   * `src/autonomy.ts`. Absent when there's no shipped/reverted commit to
+   * measure (e.g. a pre-commit abandon).
+   */
+  filesChanged?: number;
 }
 
 /**
@@ -133,6 +141,10 @@ function isFeatureLogEntry(value: unknown): value is FeatureLogEntry {
   }
 
   if (candidate.selfAssessment !== undefined && !isFeatureSelfAssessment(candidate.selfAssessment)) {
+    return false;
+  }
+
+  if (candidate.filesChanged !== undefined && typeof candidate.filesChanged !== "number") {
     return false;
   }
 

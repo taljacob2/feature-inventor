@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseBacklogCounts, parseChangelogEntries, parseNowSection, type BacklogCounts } from "./roadmap.js";
 import { parseFeatureLogEntries, type FeatureLogEntry } from "./feature-log.js";
 import { computeCalibrationStats, type CalibrationStats } from "./calibration.js";
+import { computeAutonomyScore } from "./autonomy.js";
 import { RUN_SUMMARY_FILENAME, parseRunSummary, type RunSummary } from "./run-summary.js";
 import { STOP_FLAG_FILENAME, parseStopFlag, serializeStopFlag } from "./stop-flag.js";
 import {
@@ -146,7 +147,9 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
   } else {
     for (const entry of recentAttempts) {
       const suffix = entry.commitSha ? ` (${entry.commitSha})` : "";
-      console.log(`  - [${entry.status}] ${entry.title} — ICE ${entry.ice.composite.toFixed(1)}${suffix}`);
+      const autonomy = entry.selfAssessment || entry.filesChanged !== undefined ? computeAutonomyScore(entry) : null;
+      const autonomySuffix = autonomy ? ` [autonomy ${autonomy.score}/10]` : "";
+      console.log(`  - [${entry.status}] ${entry.title} — ICE ${entry.ice.composite.toFixed(1)}${suffix}${autonomySuffix}`);
     }
   }
 

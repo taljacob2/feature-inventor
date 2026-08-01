@@ -344,8 +344,9 @@ const VERIFY_SCHEMA = {
     testsRerun: { type: 'string', description: 'what you independently re-ran and its actual result' },
     concerns: { type: 'string', description: 'issues found, even minor ones — report even if verified=true' },
     reverted: { type: 'boolean', description: 'true if you ran git revert because verification failed' },
+    filesChanged: { type: 'integer', description: 'from `git show --stat`: how many files did the diff touch — a factual count, not a self-report, feeding the harness-vs-dark-factory autonomy score' },
   },
-  required: ['verified', 'testsRerun', 'reverted'],
+  required: ['verified', 'testsRerun', 'reverted', 'filesChanged'],
 }
 
 const REEVALUATE_SCHEMA = {
@@ -538,7 +539,9 @@ Claimed commit sha: ${result.commitSha}
 Implementer's summary: ${result.summary}
 Implementer's reported tests: ${result.testsRun || '(none reported)'}
 
-1. Run \`git show --stat ${result.commitSha}\` and actually read the diff.
+1. Run \`git show --stat ${result.commitSha}\` and actually read the diff. Report "filesChanged" as
+   the number of files that command's summary line lists as touched — a factual count from the
+   diff itself, not anything self-reported by the implementer.
 2. Independently re-run \`npm test\` and \`npm run build\` yourself in ${REPO_ROOT} — do not reuse
    the implementer's report.
 3. Judge whether the diff genuinely does what it claims, and whether the tests meaningfully cover
@@ -564,6 +567,7 @@ Do not push to any remote.`,
       commitSha: result.commitSha,
       verificationConcerns: verification.concerns,
       selfAssessment: result.selfAssessment,
+      filesChanged: verification.filesChanged,
     })
   } else {
     const reason = verification
@@ -587,6 +591,7 @@ Do not push to any remote.`,
       commitSha: result.commitSha,
       verificationConcerns: verification ? verification.concerns : undefined,
       selfAssessment: result.selfAssessment,
+      filesChanged: verification ? verification.filesChanged : undefined,
     })
   }
 }
