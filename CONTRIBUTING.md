@@ -64,7 +64,12 @@ knowing before you edit it:
   this again.
 
 The workflow accepts optional `args`: `repoRoot` (explicit path override),
-`branchName` (default `"nightly"`), `maxFeatures` (default `3`).
+`branchName` (default `"nightly"`), `maxFeatures` (default `3`), `outputMode`
+(default `"auto-commit"` — the only mode actually implemented; other values
+error out with an explanation rather than silently doing the wrong thing,
+since `"pr-per-feature"` in particular would require pushing to a remote,
+conflicting with the never-push safety boundary until a human decides
+otherwise).
 
 ## Recording what shipped
 

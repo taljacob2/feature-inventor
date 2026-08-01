@@ -20,6 +20,9 @@ export const meta = {
 //   repoRoot     - explicit absolute path override (see resolveRepoRoot below)
 //   branchName   - defaults to "nightly"
 //   maxFeatures  - defaults to 3
+//   outputMode   - defaults to "auto-commit" (see below; other values are
+//                  recognized but not yet implemented, and error out rather
+//                  than silently doing the wrong thing)
 
 // Resolved at run start rather than hardcoded to one machine's absolute
 // path — this script has no direct filesystem access itself (only the
@@ -68,6 +71,30 @@ const REPO_ROOT = await resolveRepoRoot()
 const BRANCH_NAME = (args && args.branchName) || 'nightly'
 const MAX_FEATURES_PER_RUN = (args && args.maxFeatures) || 3
 const MAX_ATTEMPTS = MAX_FEATURES_PER_RUN * 3 // allow skipping abandoned candidates without capping throughput
+
+// Output-mode switch (ROADMAP.md's "Output-mode switch" Later item). Only
+// "auto-commit" (the only mode this loop has ever actually done — commit
+// straight to BRANCH_NAME, never push) is implemented. The other two modes
+// are recognized so a caller's typo/intent is visible in the error rather
+// than silently falling back to auto-commit, but they're deliberately left
+// unimplemented rather than half-built:
+//   - "pr-per-feature" would need to push a branch per feature and open a PR
+//     via `gh pr create`, which requires pushing to a remote — a direct
+//     conflict with VISION.md's "never push to a remote" harness-not-
+//     dark-factory boundary. That's a real decision for a human to make
+//     explicitly (e.g. a scoped exception, or a different remote/fork), not
+//     something to resolve unilaterally inside this switch statement.
+//   - "batched-summary" (commit locally per feature as now, but only surface
+//     one end-of-run summary instead of per-feature notifications) is just
+//     not built yet.
+const OUTPUT_MODE = (args && args.outputMode) || 'auto-commit'
+if (OUTPUT_MODE !== 'auto-commit') {
+  throw new Error(
+    `outputMode "${OUTPUT_MODE}" is recognized but not yet implemented (only "auto-commit" is). ` +
+    'See the "Output-mode switch" item in ROADMAP.md — in particular, "pr-per-feature" requires ' +
+    'deciding how it interacts with the never-push-to-a-remote safety boundary before it can be built.'
+  )
+}
 
 // Durable, cross-run record of every feature attempt (title, ICE score,
 // status, reason, commit sha, verification concerns) — see
