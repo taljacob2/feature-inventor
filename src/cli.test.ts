@@ -6,6 +6,7 @@ import { printHelp, printStatus, printVersion, runRecap, runStop } from "./cli.j
 import type { StatusData } from "./cli.js";
 import { STOP_FLAG_FILENAME, parseStopFlag } from "./stop-flag.js";
 import { RECAP_STATE_FILENAME, parseRecapState } from "./recap.js";
+import type { RecapData } from "./recap.js";
 import { RUN_SUMMARY_FILENAME, serializeRunSummary } from "./run-summary.js";
 
 describe("printStatus", () => {
@@ -543,5 +544,64 @@ describe("runRecap", () => {
 
     const newState = parseRecapState(readFileSync(join(dir, RECAP_STATE_FILENAME), "utf8"));
     expect(newState?.lastRecapAt).not.toBe("2020-06-01");
+  });
+
+  it("emits parseable JSON with the parsed recap data when --json is passed", () => {
+    writeLog([
+      {
+        date: "2026-08-01",
+        title: "First feature",
+        ice: { impact: 6, confidence: 8, ease: 9, composite: 7.7 },
+        status: "shipped",
+        commitSha: "abc1234",
+      },
+      {
+        date: "2026-08-01",
+        title: "Second feature",
+        ice: { impact: 2, confidence: 5, ease: 3, composite: 3 },
+        status: "abandoned",
+      },
+    ]);
+
+    runRecap(dir, { all: true, json: true });
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const [output] = logSpy.mock.calls[0] as [string];
+    const parsed = JSON.parse(output) as RecapData;
+
+    expect(parsed.sinceLabel).toBe("all time");
+    expect(parsed.shipped).toHaveLength(1);
+    expect(parsed.shipped[0]).toMatchObject({ title: "First feature", commitSha: "abc1234" });
+    expect(parsed.abandonedOrReverted).toHaveLength(1);
+    expect(parsed.abandonedOrReverted[0]).toMatchObject({ title: "Second feature", status: "abandoned" });
+  });
+
+  it("does not print formatted text when --json is passed", () => {
+    writeLog([
+      {
+        date: "2026-08-01",
+        title: "First feature",
+        ice: { impact: 6, confidence: 8, ease: 9, composite: 7.7 },
+        status: "shipped",
+        commitSha: "abc1234",
+      },
+    ]);
+
+    runRecap(dir, { all: true, json: true });
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).not.toContain("While you were sleeping");
+    expect(output).not.toContain("shipped, ");
+  });
+
+  it("still writes the recap-state watermark when --json is passed (unless --peek)", () => {
+    writeLog([]);
+
+    runRecap(dir, { json: true });
+    expect(existsSync(join(dir, RECAP_STATE_FILENAME))).toBe(true);
+
+    rmSync(join(dir, RECAP_STATE_FILENAME));
+    runRecap(dir, { json: true, peek: true });
+    expect(existsSync(join(dir, RECAP_STATE_FILENAME))).toBe(false);
   });
 });

@@ -72,7 +72,8 @@ feature-inventor recap
 Summarizes what shipped, was abandoned, or was reverted since the last time
 you ran `recap` (it remembers a watermark date locally, gitignored, not
 committed). `--all` shows the full history instead; `--peek` previews without
-moving the watermark; `--since YYYY-MM-DD` picks an explicit start date.
+moving the watermark; `--since YYYY-MM-DD` picks an explicit start date. Add
+`--json` for machine-readable output (same data, no formatted text).
 
 ### Stopping a run gracefully
 

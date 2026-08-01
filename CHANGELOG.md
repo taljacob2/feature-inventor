@@ -31,6 +31,25 @@ Format per entry:
 - Notes from re-evaluation:
 ```
 
+## 2026-08-01 — `feature-inventor recap --json` (hand-built)
+
+- Effort/value estimate vs actual: ICE 4/8/9 (composite 7.0) — matched;
+  `buildRecap()` already returned a plain, JSON-serializable `RecapData`
+  object, so the change was a one-line branch in `runRecap` mirroring the
+  already-shipped `status --json` pattern.
+- Sanity checks: pass — `npm test` (87/87 tests, including 3 new
+  `cli.test.ts` cases covering JSON output shape, absence of formatted text,
+  and that the recap-state watermark is still written/skipped correctly with
+  `--json`) and `npm run build` both green.
+- Commit: this commit
+- Notes from re-evaluation: `runRecap` previously always called
+  `formatRecap(buildRecap(...))` and printed the formatted text. Added a
+  `json` option threaded from a new `--json` CLI flag; when set, `runRecap`
+  prints `JSON.stringify(buildRecap(...), null, 2)` instead of the formatted
+  string. The `--peek`/watermark-write behavior is unchanged and applies the
+  same regardless of output mode. Updated `USAGE` and README to document the
+  new flag.
+
 ## 2026-08-01 — Preview upcoming Next-section titles in `status` when Now is empty (hand-built)
 
 - Effort/value estimate vs actual: ICE 7/7/8 (composite 7.3) — matched; the

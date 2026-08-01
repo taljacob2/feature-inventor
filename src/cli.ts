@@ -248,7 +248,7 @@ export function runStop(repoRoot: string, options: { cancel?: boolean } = {}): v
  */
 export function runRecap(
   repoRoot: string,
-  options: { since?: string; all?: boolean; peek?: boolean } = {},
+  options: { since?: string; all?: boolean; peek?: boolean; json?: boolean } = {},
 ): void {
   const featureLogContent = readOptionalFile(repoRoot, "feature-log.jsonl");
   const entries = featureLogContent ? parseFeatureLogEntries(featureLogContent) : [];
@@ -264,7 +264,8 @@ export function runRecap(
     sinceDate = state ? state.lastRecapAt : null;
   }
 
-  console.log(formatRecap(buildRecap(entries, sinceDate)));
+  const data = buildRecap(entries, sinceDate);
+  console.log(options.json ? JSON.stringify(data, null, 2) : formatRecap(data));
 
   if (!options.peek) {
     const today = new Date().toISOString().slice(0, 10);
@@ -272,7 +273,8 @@ export function runRecap(
   }
 }
 
-const USAGE = "Usage: feature-inventor [status [--json] | recap [--since DATE|--all] [--peek] | stop [--cancel] | --help | --version]";
+const USAGE =
+  "Usage: feature-inventor [status [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | --help | --version]";
 
 /**
  * Prints usage/description and exits 0. Shared by the `--help`/`-h` flags
@@ -306,7 +308,12 @@ function main(): void {
     case "recap": {
       const sinceIndex = rest.indexOf("--since");
       const since = sinceIndex !== -1 ? rest[sinceIndex + 1] : undefined;
-      runRecap(process.cwd(), { since, all: rest.includes("--all"), peek: rest.includes("--peek") });
+      runRecap(process.cwd(), {
+        since,
+        all: rest.includes("--all"),
+        peek: rest.includes("--peek"),
+        json: rest.includes("--json"),
+      });
       break;
     }
     case "stop":
