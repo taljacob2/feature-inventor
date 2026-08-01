@@ -21,6 +21,22 @@ const BRANCH_NAME = 'nightly'
 const MAX_FEATURES_PER_RUN = (args && args.maxFeatures) || 3
 const MAX_ATTEMPTS = MAX_FEATURES_PER_RUN * 3 // allow skipping abandoned candidates without capping throughput
 
+// Durable, cross-run record of every feature attempt (title, ICE score,
+// status, reason, commit sha, verification concerns) — see
+// src/feature-log.ts for the shared schema and parsing logic that
+// `feature-inventor status` reads back. This loop only ever appends: a
+// single JSON object per line, so a partial write never corrupts prior
+// history. Uses a dynamic import (not a static `import`) since this file
+// isn't guaranteed to be loaded as a plain ES module by whatever host is
+// executing this workflow.
+const FEATURE_LOG_PATH = `${REPO_ROOT}/feature-log.jsonl`
+
+async function appendFeatureLogEntry(entry) {
+  const { appendFile } = await import('node:fs/promises')
+  const line = JSON.stringify({ date: new Date().toISOString().slice(0, 10), ...entry }) + '\n'
+  await appendFile(FEATURE_LOG_PATH, line, 'utf8')
+}
+
 // ICE (Impact/Confidence/Ease), each 1-10, replaces ad-hoc S/M/L per
 // RESEARCH.md §3. Ranking is computed here in plain code rather than left
 // to agent judgment — arithmetic should be deterministic, not guessed at.
@@ -214,13 +230,26 @@ Rules (see VISION.md operating principles):
 
   if (!result) {
     log(`No result for "${feature.title}" (agent error) — treating as abandoned.`)
-    abandoned.push({ feature, reason: 'agent error / no result' })
+    const reason = 'agent error / no result'
+    abandoned.push({ feature, reason })
+    await appendFeatureLogEntry({
+      title: feature.title,
+      ice: { impact: feature.impact, confidence: feature.confidence, ease: feature.ease, composite: iceScore },
+      status: 'abandoned',
+      reason,
+    })
     continue
   }
 
   if (result.status !== 'shipped') {
     log(`Abandoned: ${feature.title} — ${result.reason || 'no reason given'}`)
     abandoned.push({ feature, reason: result.reason })
+    await appendFeatureLogEntry({
+      title: feature.title,
+      ice: { impact: feature.impact, confidence: feature.confidence, ease: feature.ease, composite: iceScore },
+      status: 'abandoned',
+      reason: result.reason || 'no reason given',
+    })
     continue
   }
 
@@ -257,12 +286,30 @@ Do not push to any remote.`,
   if (verification && verification.verified) {
     log(`Shipped (verified): ${feature.title} (${result.commitSha})${verification.concerns ? ` — noted: ${verification.concerns}` : ''}`)
     shipped.push({ feature, result, verification })
+    await appendFeatureLogEntry({
+      title: feature.title,
+      ice: { impact: feature.impact, confidence: feature.confidence, ease: feature.ease, composite: iceScore },
+      status: 'shipped',
+      commitSha: result.commitSha,
+      verificationConcerns: verification.concerns,
+    })
   } else {
     const reason = verification
       ? `failed independent verification: ${verification.concerns || 'no concerns given'}`
       : 'verification agent error — treating as unverified, not trusting the shipped claim'
     log(`Reverted after failed verification: ${feature.title} — ${reason}`)
     abandoned.push({ feature, reason })
+    // "reverted" (not "abandoned") when a verification agent actually ran and
+    // rejected a shipped claim, since that commit did land before being
+    // reverted — distinct from a candidate abandoned pre-commit.
+    await appendFeatureLogEntry({
+      title: feature.title,
+      ice: { impact: feature.impact, confidence: feature.confidence, ease: feature.ease, composite: iceScore },
+      status: verification ? 'reverted' : 'abandoned',
+      reason,
+      commitSha: result.commitSha,
+      verificationConcerns: verification ? verification.concerns : undefined,
+    })
   }
 }
 

@@ -14,4 +14,38 @@ Format per entry:
 - Notes from re-evaluation:
 ```
 
-No entries yet — this repo hasn't had its first nightly run.
+## 2026-08-01 — README.md quickstart
+
+- Effort/value estimate vs actual: ICE 4/7/9 (composite 6.7) — matched; pure
+  documentation, no code touched.
+- Sanity checks: pass — `npm test` (22/22 tests) and `npm run build` both
+  green (neither exercises README.md, so this confirms no regression from
+  adding the file, not that the doc's contents are correct — verified the
+  latter by re-reading it against `src/cli.ts`'s actual `status` output and
+  `VISION.md`'s loop description).
+- Commit: this commit
+- Notes from re-evaluation: Added a root `README.md` covering what the
+  project is, a quickstart for `feature-inventor status` (build once via
+  `npm run build`, then `feature-inventor status` / `node dist/cli.js
+  status` / `npm start -- status`), and a walkthrough of the nightly loop's
+  five phases (Research, Prioritize, Implement, Verify, Finalize) with the
+  harness-not-dark-factory boundary called out. No code changed; existing
+  test/build coverage is unaffected by design.
+
+## 2026-08-01 — Clean error + non-zero exit in cli.ts for missing/malformed ROADMAP.md or CHANGELOG.md
+- Effort/value estimate vs actual: ICE 6/8/9 (composite 7.7) — matched; the fix was a small try/catch wrapper as expected.
+- Sanity checks: pass — `npm test` (10/10 tests, including 3 new cli.test.ts cases) and `npm run build` both green; manually ran `dist/cli.js status` from a directory with no ROADMAP.md/CHANGELOG.md and confirmed a one-line `Error: could not read ROADMAP.md (...)` message with exit code 1, and confirmed normal `status` output still works from the repo root.
+- Commit: this commit
+- Notes from re-evaluation:
+
+## 2026-08-01 — Structured feature-attempt log persisted to a file
+- Effort/value estimate vs actual: ICE 7/7/7 (composite 7.0) — matched; plain JSON Lines I/O, no architectural risk, exactly as scoped.
+- Sanity checks: pass — `npm test` (22/22 tests, including 10 new src/feature-log.test.ts cases and 2 new src/cli.test.ts cases) and `npm run build` both green; manually simulated the new `appendFeatureLogEntry` helper's dynamic-`import('node:fs/promises')` call outside vitest and confirmed it appends valid, parseable JSON Lines records.
+- Commit: this commit
+- Notes from re-evaluation: Added `src/feature-log.ts` (serialize/append/parse for a `feature-log.jsonl` record: date, title, ICE score, status shipped/abandoned/reverted, reason, commit sha, verification concerns) plus tests, wired `workflows/nightly.js`'s Implement-phase loop to append one entry per feature attempt (agent-error, pre-verification abandon, post-verification shipped, and post-revert cases all covered), and extended `feature-inventor status` to read the log back as a "Recent feature attempts" section so the history survives past a single run's in-memory `shipped`/`abandoned` arrays. `nightly.js` already relies on a non-standard execution model (top-level `return`/`await` predating this change, confirmed still present on a clean checkout), so the new persistence call uses a dynamic `import()` inside an `async function` rather than a static top-level `import`, matching the file's existing pattern rather than introducing new syntax risk.
+
+## 2026-08-01 — `status --json` machine-readable output mode
+- Effort/value estimate vs actual: ICE 5/6/8 (composite 6.3) — matched; the existing parse functions already returned plain data, so this was a pure refactor-and-branch with no new parsing logic.
+- Sanity checks: pass — `npm test` (24/24 tests, including 2 new `cli.test.ts` cases covering `--json` output and its structure) and `npm run build` both green; manually ran `dist/cli.js status --json` and confirmed valid, `JSON.parse`-able output with `nowItems`/`recentShipped`/`recentAttempts` matching the plain-text `status` output's content, and confirmed `dist/cli.js status` (no flag) is unchanged.
+- Commit: this commit
+- Notes from re-evaluation: Extracted a new `getStatusData(repoRoot)` in `src/cli.ts` that reads ROADMAP.md/CHANGELOG.md/feature-log.jsonl and returns the same `{ nowItems, recentShipped, recentAttempts }` shape `printStatus` already rendered as text, so the JSON and text paths can't drift apart. `printStatus` now takes an `{ json?: boolean }` option; `main()` parses a `--json` flag off `process.argv` for the `status` subcommand. No change to the default (no-flag) text output. This is the swappable-runtime-adapter groundwork VISION.md calls for — a future hosted-service adapter or CI script can now consume `status` without scraping console lines.
