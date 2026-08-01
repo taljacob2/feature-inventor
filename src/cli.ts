@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseBacklogCounts, parseChangelogEntries, parseNowSection, type BacklogCounts } from "./roadmap.js";
 import { parseFeatureLogEntries, type FeatureLogEntry } from "./feature-log.js";
+import { computeCalibrationStats, type CalibrationStats } from "./calibration.js";
 import { STOP_FLAG_FILENAME, parseStopFlag, serializeStopFlag } from "./stop-flag.js";
 import {
   RECAP_STATE_FILENAME,
@@ -41,6 +42,8 @@ export interface StatusData {
   backlogCounts: BacklogCounts;
   recentShipped: string[];
   recentAttempts: FeatureLogEntry[];
+  /** Computed from the full feature-log.jsonl history, not just recentAttempts. */
+  calibration: CalibrationStats;
   /** ISO 8601 timestamp if a `feature-inventor stop` request is pending, else null. */
   stopRequestedAt: string | null;
 }
@@ -60,9 +63,9 @@ export function getStatusData(repoRoot: string): StatusData {
   const recentShipped = parseChangelogEntries(changelog, 5);
 
   const featureLogContent = readOptionalFile(repoRoot, "feature-log.jsonl");
-  const recentAttempts = featureLogContent
-    ? parseFeatureLogEntries(featureLogContent).slice(-5).reverse()
-    : [];
+  const allAttempts = featureLogContent ? parseFeatureLogEntries(featureLogContent) : [];
+  const recentAttempts = allAttempts.slice(-5).reverse();
+  const calibration = computeCalibrationStats(allAttempts);
 
   const stopFlagContent = readOptionalFile(repoRoot, STOP_FLAG_FILENAME);
   let stopRequestedAt: string | null = null;
@@ -71,7 +74,7 @@ export function getStatusData(repoRoot: string): StatusData {
     stopRequestedAt = parsed ? parsed.requestedAt : "(unknown time)";
   }
 
-  return { nowItems, backlogCounts, recentShipped, recentAttempts, stopRequestedAt };
+  return { nowItems, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt };
 }
 
 export function printStatus(repoRoot: string, options: { json?: boolean } = {}): void {
@@ -82,7 +85,7 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
     return;
   }
 
-  const { nowItems, backlogCounts, recentShipped, recentAttempts, stopRequestedAt } = data;
+  const { nowItems, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt } = data;
 
   console.log("Feature Inventor — status\n");
 
@@ -118,6 +121,27 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
     for (const entry of recentAttempts) {
       const suffix = entry.commitSha ? ` (${entry.commitSha})` : "";
       console.log(`  - [${entry.status}] ${entry.title} — ICE ${entry.ice.composite.toFixed(1)}${suffix}`);
+    }
+  }
+
+  console.log("\nCalibration:");
+  if (calibration.totalEntries === 0) {
+    console.log("  (nothing logged yet — see feature-log.jsonl once the loop has run)");
+  } else {
+    const fmt = (n: number | null) => (n === null ? "n/a" : n.toFixed(1));
+    console.log(
+      `  Shipped ${calibration.outcomeCounts.shipped} (avg predicted confidence ${fmt(calibration.averageIceConfidence.shipped)}), ` +
+        `abandoned ${calibration.outcomeCounts.abandoned} (${fmt(calibration.averageIceConfidence.abandoned)}), ` +
+        `reverted ${calibration.outcomeCounts.reverted} (${fmt(calibration.averageIceConfidence.reverted)}).`,
+    );
+    if (calibration.hallucinationRate === null) {
+      console.log("  Hallucination rate: n/a (no self-assessed \"confident\" shipped/reverted features yet)");
+    } else {
+      console.log(
+        `  Hallucination rate: ${(calibration.hallucinationRate * 100).toFixed(0)}% ` +
+          `(${calibration.confidentButRevertedCount} of ${calibration.confidentButRevertedCount + calibration.confidentAndShippedCount} ` +
+          `self-reported-confident features were later reverted).`,
+      );
     }
   }
 }

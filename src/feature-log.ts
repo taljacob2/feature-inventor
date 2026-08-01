@@ -15,6 +15,32 @@ export interface FeatureLogIceScore {
 
 export type FeatureAttemptStatus = "shipped" | "abandoned" | "reverted";
 
+export type Creativity = "routine" | "creative" | "novel";
+export type DifficultyTier = "easy" | "medium" | "hard";
+export type ModelFit = "overkill" | "right-sized" | "underpowered";
+
+/**
+ * The implementing agent's own retrospective read on a feature it just
+ * attempted — raw data for the Calibration log and harness-vs-dark-factory
+ * ROADMAP.md items. Optional because it's only collected going forward (see
+ * `RESEARCH.md` §4 on why self-reported confidence needs prompting that
+ * resists drifting upward without cause).
+ */
+export interface FeatureSelfAssessment {
+  /** Reused an existing pattern, combined existing ideas creatively, or genuinely novel. */
+  creativity: Creativity;
+  /** Independent of the pre-scored ICE Ease value — how hard this actually was. */
+  difficulty: DifficultyTier;
+  /** Actually confident this does what it claims, vs. hoping the tests happened to pass. */
+  confident: boolean;
+  /** Would have wanted a human to weigh in, even if it proceeded alone. */
+  wantedHumanGuidance: boolean;
+  /** What had to be guessed/inferred because it was missing from the repo/docs. */
+  knowledgeGaps?: string;
+  /** Whether a cheaper model likely would have sufficed, this one was about right, or a more capable one was genuinely needed. */
+  modelFit: ModelFit;
+}
+
 export interface FeatureLogEntry {
   /** YYYY-MM-DD, the date the attempt was made. */
   date: string;
@@ -27,6 +53,8 @@ export interface FeatureLogEntry {
   commitSha?: string;
   /** Notes from independent verification, even when it passed. */
   verificationConcerns?: string;
+  /** Absent for attempts where the implementing agent never returned a result at all. */
+  selfAssessment?: FeatureSelfAssessment;
 }
 
 /**
@@ -104,5 +132,27 @@ function isFeatureLogEntry(value: unknown): value is FeatureLogEntry {
     return false;
   }
 
+  if (candidate.selfAssessment !== undefined && !isFeatureSelfAssessment(candidate.selfAssessment)) {
+    return false;
+  }
+
   return true;
+}
+
+const CREATIVITY_VALUES: Creativity[] = ["routine", "creative", "novel"];
+const DIFFICULTY_VALUES: DifficultyTier[] = ["easy", "medium", "hard"];
+const MODEL_FIT_VALUES: ModelFit[] = ["overkill", "right-sized", "underpowered"];
+
+function isFeatureSelfAssessment(value: unknown): value is FeatureSelfAssessment {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+
+  return (
+    CREATIVITY_VALUES.includes(candidate.creativity as Creativity) &&
+    DIFFICULTY_VALUES.includes(candidate.difficulty as DifficultyTier) &&
+    typeof candidate.confident === "boolean" &&
+    typeof candidate.wantedHumanGuidance === "boolean" &&
+    (candidate.knowledgeGaps === undefined || typeof candidate.knowledgeGaps === "string") &&
+    MODEL_FIT_VALUES.includes(candidate.modelFit as ModelFit)
+  );
 }

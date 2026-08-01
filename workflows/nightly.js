@@ -181,6 +181,24 @@ const PRIORITIZE_SCHEMA = {
   required: ['keptFeatures'],
 }
 
+// Retrospective self-assessment, collected on every attempt regardless of
+// outcome — the raw signal the Calibration log and harness-vs-dark-factory
+// ROADMAP.md items depend on. RESEARCH.md §4 found self-reported confidence
+// carries real signal but drifts upward without cause, so the prompt below
+// explicitly tells the agent this isn't graded on sounding confident.
+const SELF_ASSESSMENT_SCHEMA = {
+  type: 'object',
+  properties: {
+    creativity: { type: 'string', enum: ['routine', 'creative', 'novel'], description: 'Was the approach a routine reuse of an existing pattern, a creative combination of existing ideas, or genuinely novel?' },
+    difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'], description: 'Your own honest read on how hard this actually was, independent of the pre-scored ICE Ease value — it is fine, expected even, for this to disagree with Ease.' },
+    confident: { type: 'boolean', description: 'Are you actually confident this does what it claims, as opposed to hoping the tests happened to pass?' },
+    wantedHumanGuidance: { type: 'boolean', description: 'In hindsight, would you have wanted a human to weigh in on this feature before or during implementation?' },
+    knowledgeGaps: { type: 'string', description: 'Optional: anything you had to guess at or infer because it was missing from the repo/docs — spec gaps, unwritten conventions, assumptions you had no way to verify.' },
+    modelFit: { type: 'string', enum: ['overkill', 'right-sized', 'underpowered'], description: 'Honest read on whether a cheaper/faster model likely would have sufficed for this specific feature, this model was about right, or a more capable model was genuinely needed.' },
+  },
+  required: ['creativity', 'difficulty', 'confident', 'wantedHumanGuidance', 'modelFit'],
+}
+
 const IMPLEMENT_SCHEMA = {
   type: 'object',
   properties: {
@@ -189,8 +207,9 @@ const IMPLEMENT_SCHEMA = {
     reason: { type: 'string', description: 'required when abandoned: why it was too hard/risky/out of scope' },
     commitSha: { type: 'string', description: 'required when shipped' },
     testsRun: { type: 'string', description: 'what sanity checks/tests were run and their result' },
+    selfAssessment: SELF_ASSESSMENT_SCHEMA,
   },
-  required: ['status', 'summary'],
+  required: ['status', 'summary', 'selfAssessment'],
 }
 
 const VERIFY_SCHEMA = {
@@ -339,7 +358,12 @@ Rules (see VISION.md operating principles):
   must be accurate.
 - Do not modify ROADMAP.md yourself — a later step reconciles the whole roadmap at once from every
   feature attempted this run.
-- Do not push to any remote.`,
+- Do not push to any remote.
+- Whether shipped or abandoned, fill in "selfAssessment" honestly. This is not graded on sounding
+  confident — RESEARCH.md §4 found self-reported confidence tends to drift upward without cause,
+  and an honest "hard"/"not confident"/"wanted human guidance" is more useful here than an
+  optimistic one that doesn't hold up. It feeds a calibration log that compares these claims
+  against what independent verification actually finds.`,
     { schema: IMPLEMENT_SCHEMA, phase: 'Implement', label: `implement:${feature.title}` }
   )
 
@@ -364,6 +388,7 @@ Rules (see VISION.md operating principles):
       ice: { impact: feature.impact, confidence: feature.confidence, ease: feature.ease, composite: iceScore },
       status: 'abandoned',
       reason: result.reason || 'no reason given',
+      selfAssessment: result.selfAssessment,
     })
     continue
   }
@@ -407,6 +432,7 @@ Do not push to any remote.`,
       status: 'shipped',
       commitSha: result.commitSha,
       verificationConcerns: verification.concerns,
+      selfAssessment: result.selfAssessment,
     })
   } else {
     const reason = verification
@@ -416,7 +442,11 @@ Do not push to any remote.`,
     abandoned.push({ feature, reason })
     // "reverted" (not "abandoned") when a verification agent actually ran and
     // rejected a shipped claim, since that commit did land before being
-    // reverted — distinct from a candidate abandoned pre-commit.
+    // reverted — distinct from a candidate abandoned pre-commit. Keeping the
+    // implementer's selfAssessment here specifically (rather than dropping
+    // it) is what makes the hallucination-rate calibration metric possible:
+    // a "confident: true" self-report that got reverted anyway is exactly
+    // the signal that metric exists to surface.
     await appendFeatureLogEntry({
       title: feature.title,
       ice: { impact: feature.impact, confidence: feature.confidence, ease: feature.ease, composite: iceScore },
@@ -424,6 +454,7 @@ Do not push to any remote.`,
       reason,
       commitSha: result.commitSha,
       verificationConcerns: verification ? verification.concerns : undefined,
+      selfAssessment: result.selfAssessment,
     })
   }
 }
@@ -449,7 +480,11 @@ Do the following, in order:
 1. Reflect honestly: were the priority calls this run actually right in hindsight? Did any
    "abandoned" or failed-verification reason suggest an ICE estimate (especially Confidence or
    Ease) was systematically wrong in a way that should change how future runs estimate similar
-   work?
+   work? If feature-log.jsonl exists, read it (or run \`node dist/cli.js status --json\` if
+   \`dist/\` is built, which includes a "calibration" section computed from the full history) and
+   check whether tonight's outcomes continue or break any pattern already visible there — e.g. a
+   consistently high hallucination rate (self-reported "confident" features that got reverted
+   anyway) is a sign Confidence estimates need to be read more skeptically, not just tonight's.
 2. Rewrite ROADMAP.md: move shipped items out, keep or re-prioritize abandoned/not-attempted items,
    and — per VISION.md operating principle #3 — ensure the Horizon section still has at least one
    speculative item so the backlog never visibly empties. Keep the existing file's format and

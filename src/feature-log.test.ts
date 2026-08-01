@@ -77,6 +77,40 @@ describe("parseFeatureLogEntries", () => {
     expect(parseFeatureLogEntries(content)).toEqual([reverted]);
   });
 
+  it("round-trips an entry with a selfAssessment block", () => {
+    const withSelfAssessment: FeatureLogEntry = {
+      ...SHIPPED_ENTRY,
+      selfAssessment: {
+        creativity: "creative",
+        difficulty: "medium",
+        confident: true,
+        wantedHumanGuidance: false,
+        knowledgeGaps: "wasn't sure how the Workflow tool's fs restrictions applied here",
+        modelFit: "right-sized",
+      },
+    };
+    const content = appendFeatureLogEntries("", [withSelfAssessment]);
+    expect(parseFeatureLogEntries(content)).toEqual([withSelfAssessment]);
+  });
+
+  it("skips an entry with an invalid selfAssessment (bad enum value)", () => {
+    const content = JSON.stringify({
+      ...SHIPPED_ENTRY,
+      selfAssessment: {
+        creativity: "wildly-inventive", // not a valid Creativity value
+        difficulty: "medium",
+        confident: true,
+        wantedHumanGuidance: false,
+        modelFit: "right-sized",
+      },
+    });
+    expect(parseFeatureLogEntries(content)).toEqual([]);
+  });
+
+  it("treats an entry with no selfAssessment as valid (field is optional)", () => {
+    expect(parseFeatureLogEntries(appendFeatureLogEntries("", [SHIPPED_ENTRY]))).toEqual([SHIPPED_ENTRY]);
+  });
+
   it("skips blank lines and lines that fail to parse as JSON", () => {
     const content = [
       serializeFeatureLogEntry(SHIPPED_ENTRY),
