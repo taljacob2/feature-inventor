@@ -29,9 +29,34 @@ node dist/cli.js status
 # or: npm start -- status
 ```
 
-If you'd rather run the bare `feature-inventor` command instead, register it
-on your PATH once with `npm install -g .` (or `npm link`) from the repo
-root; that's an optional convenience, not something the project requires.
+### Installing the `feature-inventor` command globally (optional)
+
+Everything in this doc works without this step — `node dist/cli.js <command>`
+is enough on its own. If you'd rather type the bare `feature-inventor`
+command:
+
+```sh
+npm link
+```
+
+This symlinks `feature-inventor` on your PATH to this repo's `dist/cli.js`.
+Because it's a symlink to this repo — not a copy — **upgrading later is just
+rebuilding, not reinstalling**:
+
+```sh
+git pull
+npm install     # only needed if dependencies changed
+npm run build    # recompiles dist/ -- the linked command picks it up immediately
+```
+
+No need to re-run `npm link` after pulling updates; only if `package.json`'s
+`bin` entry itself changes. To remove it: `npm unlink -g feature-inventor`.
+
+(`npm install -g .` is the alternative — it copies the files instead of
+symlinking, works the same day-to-day, but then "upgrading" means re-running
+`npm install -g .` after every `git pull` + `npm run build`, since a copy
+doesn't see local changes on its own. `npm link` is simpler for a project
+like this one that changes under you.)
 
 ```sh
 feature-inventor status
@@ -104,6 +129,16 @@ to do it.
 
 ### Running unattended for extended periods
 
+**Running this starts real, ongoing work immediately — it does not ask for
+confirmation first.** The moment you run `feature-inventor daemon`, it
+spawns a real headless Claude Code session, and by default spawns another
+one back-to-back the instant each one finishes — indefinitely, until you
+stop it (Ctrl+C) or it errors. A single run is ~20+ minutes and real API
+cost (tonight's first real run: ~892K tokens, 27 agents) — treat starting
+this as switching on an ongoing cost commitment, not running a one-off
+command. See `--max-budget-usd` below if you want a hard ceiling on that
+before you turn it on.
+
 ```sh
 claude setup-token          # one-time: long-lived auth so scheduled runs don't need an interactive login
 feature-inventor daemon --yolo
@@ -118,16 +153,11 @@ Scheduler (no OS-specific setup needed) and not Claude Code's `CronCreate`
 (which is session-only, gone if that session ends, and auto-expires after 7
 days — not a fit for "runs for months").
 
-**By default this is continuous churn**: as soon as one run finishes, the
-next one starts — no gap. A single run takes on the order of 20+ minutes and
-real API cost (tonight's first real run: ~892K tokens, 27 agents), so
-running back-to-back indefinitely is a real, ongoing cost commitment, not a
-lightweight background task — go in with that expectation, and consider
-`--max-budget-usd` below if you want a ceiling on it. It also means commits
-land on the `nightly` branch far faster than most people can review
-line-by-line; that's fine (nothing reaches `main`/`master` without a human
-merging — see `VISION.md`'s harness-not-dark-factory section), but plan to
-review in batches rather than per-commit.
+It also means commits land on the `nightly` branch far faster than most
+people can review line-by-line; that's fine (nothing reaches
+`main`/`master` without a human merging — see `VISION.md`'s
+harness-not-dark-factory section), but plan to review in batches rather
+than per-commit.
 
 - `--every DURATION` — opt into a slower, fixed cadence instead of
   continuous churn (e.g. `12h`, `1d`). Omit this for the continuous default.
