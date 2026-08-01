@@ -50,6 +50,13 @@ describe("isRunDue", () => {
     expect(isRunDue(now, last, oneHourMs)).toBe(true);
   });
 
+  it("treats intervalMs=0 as always due, even immediately after the last run -- continuous churn's default", () => {
+    const now = Date.parse("2026-08-01T12:00:00.000Z");
+    const oneMsAgo = "2026-08-01T11:59:59.999Z";
+    expect(isRunDue(now, oneMsAgo, 0)).toBe(true);
+    expect(isRunDue(now, new Date(now).toISOString(), 0)).toBe(true); // even the exact same instant isn't blocked
+  });
+
   it("treats an unparseable timestamp as due rather than getting stuck", () => {
     const now = Date.now();
     expect(isRunDue(now, "not-a-real-timestamp", oneHourMs)).toBe(true);

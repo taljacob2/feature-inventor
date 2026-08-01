@@ -100,6 +100,17 @@ Design notes worth knowing before touching this:
 - **`--yolo`/`--unattended` passes `--dangerously-skip-permissions`** to the
   spawned `claude` invocation — bypasses every permission check for that
   run. Real, documented, opt-in; don't make it the default.
+- **Default `intervalMs` is `0` — continuous churn, on purpose.** `isRunDue`
+  treats `0` as always-due, so with no `--every` flag the next run starts as
+  soon as the previous one's `.feature-inventor-last-run.json` update lands.
+  `--every DURATION` opts into a slower cadence. `checkMs`'s idle-poll sleep
+  only applies when a cycle found *nothing* due — it never adds latency
+  between two back-to-back continuous-churn runs (see `runDaemon`'s loop).
+- **`--max-budget-usd` is optional, off by default, and only added to the
+  spawn args when set** (it requires `--print`, per `claude --help`, which
+  is otherwise not passed — the default `claude --bg` invocation without
+  `--print` is the combination actually exercised against the real binary
+  so far; `--bg` + `--print` together isn't separately verified).
 - **Testing this live is genuinely risky, not just inconvenient.** Trying to
   intercept the `claude` binary via a `PATH` override to test with a fake
   stand-in failed twice while building this (Windows resolves `claude`

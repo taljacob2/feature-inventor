@@ -294,15 +294,26 @@ function appendDaemonLog(repoRoot: string, entry: DaemonLogEntry): void {
 }
 
 export interface DaemonOptions {
-  /** How often a new run should be attempted, e.g. from parseIntervalToMs("24h"). */
+  /**
+   * How often a new run should be attempted, e.g. from parseIntervalToMs("24h").
+   * Defaults to 0 (continuous churn — isRunDue treats 0 as "always due", so
+   * the next run starts as soon as the previous one finishes). Pass --every
+   * to opt into a slower, interval-based cadence instead.
+   */
   intervalMs: number;
   /** Passes --dangerously-skip-permissions to the spawned headless run. Bypasses ALL permission checks. */
   yolo?: boolean;
+  /**
+   * Passed through as --max-budget-usd to the spawned claude invocation, a
+   * hard per-run spending cap. Optional and off by default — continuous
+   * churn has no cost ceiling unless you explicitly ask for one.
+   */
+  maxBudgetUsd?: number;
   /** Max time to wait for a spawned run to actually finish before giving up on that cycle. */
   timeoutMs?: number;
   /** How often to check .feature-inventor-last-run.json for completion while a run is in flight. */
   pollMs?: number;
-  /** How often to check whether a new run is due, between cycles. */
+  /** How often to check whether a new run is due, between cycles (only used when nothing was due). */
   checkMs?: number;
   /** Run at most one cycle and return, instead of looping forever — for manual testing. */
   once?: boolean;
@@ -335,6 +346,15 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
 
   const claudeArgs = ["--bg"];
   if (options.yolo) claudeArgs.push("--dangerously-skip-permissions");
+  if (options.maxBudgetUsd !== undefined) {
+    // --max-budget-usd is documented as "only works with --print" — added
+    // here only when a cap was explicitly requested, since --bg alone
+    // (the default, no cap) is the combination actually exercised against
+    // the real `claude` binary so far. This --bg + --print pairing is not
+    // separately verified; if a budget cap is set and runs don't behave as
+    // expected, check this first.
+    claudeArgs.push("--print", "--max-budget-usd", String(options.maxBudgetUsd));
+  }
   claudeArgs.push(DAEMON_RUN_PROMPT);
 
   const spawnError = await new Promise<string | null>((resolve) => {
@@ -393,10 +413,17 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
 }
 
 /**
- * Long-running loop: checks whether a run is due every `checkMs`, and when
- * one is, spawns and waits for it via runDaemonCycleIfDue. This is
- * feature-inventor's own scheduler — deliberately not the OS's cron/Task
- * Scheduler (simpler to set up, no OS-specific configuration) and
+ * Long-running loop: checks whether a run is due, and when one is, spawns
+ * and waits for it via runDaemonCycleIfDue, then immediately checks again —
+ * with the default intervalMs of 0 (isRunDue treats 0 as "always due"),
+ * this means continuous churn: as soon as one run finishes, the next one
+ * starts, no gap. Passing --every opts into a slower, interval-based
+ * cadence instead; `checkMs` only introduces an idle-poll delay when
+ * *nothing* was due this check, so it never adds latency between two
+ * back-to-back runs.
+ *
+ * This is feature-inventor's own scheduler — deliberately not the OS's
+ * cron/Task Scheduler (simpler to set up, no OS-specific configuration) and
  * deliberately not Claude Code's CronCreate (session-only, no persistence
  * across a restart, and auto-expires after 7 days — see the conversation
  * this was designed from). The tradeoff: this process itself must keep
@@ -406,21 +433,34 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
  */
 export async function runDaemon(repoRoot: string, options: DaemonOptions): Promise<void> {
   console.log(
-    `[daemon] Starting. Checking every ${options.checkMs ?? DEFAULT_DAEMON_CHECK_MS}ms whether a run is due ` +
-      `(interval: ${options.intervalMs}ms).` +
-      (options.yolo ? " Unattended mode (--yolo): permission checks bypassed for spawned runs." : ""),
+    `[daemon] Starting. ${
+      options.intervalMs === 0
+        ? "Continuous churn: starting the next run immediately after each one finishes."
+        : `Interval mode: a new run is due every ${options.intervalMs}ms.`
+    }` +
+      (options.yolo ? " Unattended mode (--yolo): permission checks bypassed for spawned runs." : "") +
+      (options.maxBudgetUsd !== undefined ? ` Per-run budget cap: $${options.maxBudgetUsd}.` : ""),
   );
 
   for (;;) {
-    await runDaemonCycleIfDue(repoRoot, options);
+    const result = await runDaemonCycleIfDue(repoRoot, options);
     if (options.once) return;
-    await sleep(options.checkMs ?? DEFAULT_DAEMON_CHECK_MS);
+    if (result === null) {
+      // Nothing was due this check -- wait before checking again rather than
+      // busy-looping. If a cycle DID just run, skip this wait and loop back
+      // immediately, so continuous churn (intervalMs=0) has no artificial
+      // gap between one run finishing and the next one starting.
+      await sleep(options.checkMs ?? DEFAULT_DAEMON_CHECK_MS);
+    }
   }
 }
 
 const USAGE =
   "Usage: feature-inventor [status [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
-  "daemon [--every DURATION] [--yolo] [--once] | --help | --version]";
+  "daemon [--every DURATION] [--yolo] [--max-budget-usd AMOUNT] [--once] | --help | --version]\n" +
+  "  daemon defaults to continuous churn (no --every: the next run starts as soon as the previous " +
+  "one finishes). Pass --every DURATION (e.g. 12h, 1d) to slow that down instead. --max-budget-usd " +
+  "is optional and off by default.";
 
 /**
  * Prints usage/description and exits 0. Shared by the `--help`/`-h` flags
@@ -469,10 +509,15 @@ async function main(): Promise<void> {
       const everyIndex = rest.indexOf("--every");
       const pollIndex = rest.indexOf("--poll");
       const timeoutIndex = rest.indexOf("--timeout");
+      const budgetIndex = rest.indexOf("--max-budget-usd");
       await runDaemon(process.cwd(), {
-        intervalMs: parseIntervalToMs(everyIndex !== -1 ? rest[everyIndex + 1] : "24h"),
+        // Default: continuous churn (0 = always due, see isRunDue). --every
+        // opts into a slower, interval-based cadence instead.
+        intervalMs: everyIndex !== -1 ? parseIntervalToMs(rest[everyIndex + 1]!) : 0,
         pollMs: pollIndex !== -1 ? parseIntervalToMs(rest[pollIndex + 1]!) : undefined,
         timeoutMs: timeoutIndex !== -1 ? parseIntervalToMs(rest[timeoutIndex + 1]!) : undefined,
+        // Optional, off by default -- no cost ceiling unless explicitly asked for.
+        maxBudgetUsd: budgetIndex !== -1 ? Number(rest[budgetIndex + 1]) : undefined,
         yolo: rest.includes("--yolo") || rest.includes("--unattended"),
         once: rest.includes("--once"),
       });

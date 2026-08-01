@@ -106,7 +106,7 @@ to do it.
 
 ```sh
 claude setup-token          # one-time: long-lived auth so scheduled runs don't need an interactive login
-feature-inventor daemon --every 12h --yolo
+feature-inventor daemon --yolo
 ```
 
 `feature-inventor daemon` is a long-running process that decides on its own
@@ -118,13 +118,30 @@ Scheduler (no OS-specific setup needed) and not Claude Code's `CronCreate`
 (which is session-only, gone if that session ends, and auto-expires after 7
 days — not a fit for "runs for months").
 
-- `--every DURATION` — how often to attempt a run (e.g. `12h`, `1d`); default `24h`.
+**By default this is continuous churn**: as soon as one run finishes, the
+next one starts — no gap. A single run takes on the order of 20+ minutes and
+real API cost (tonight's first real run: ~892K tokens, 27 agents), so
+running back-to-back indefinitely is a real, ongoing cost commitment, not a
+lightweight background task — go in with that expectation, and consider
+`--max-budget-usd` below if you want a ceiling on it. It also means commits
+land on the `nightly` branch far faster than most people can review
+line-by-line; that's fine (nothing reaches `main`/`master` without a human
+merging — see `VISION.md`'s harness-not-dark-factory section), but plan to
+review in batches rather than per-commit.
+
+- `--every DURATION` — opt into a slower, fixed cadence instead of
+  continuous churn (e.g. `12h`, `1d`). Omit this for the continuous default.
 - `--yolo` (or `--unattended`) — bypasses Claude Code's permission prompts
   for the spawned runs (`--dangerously-skip-permissions` under the hood).
   This is a real trust decision — the spawned session can read/write files
   and run shell commands with nothing asking you to confirm — appropriate
   for this project's explicitly autonomous premise, but worth knowing what
   it actually does rather than just treating it as a fun flag name.
+- `--max-budget-usd AMOUNT` — optional, **off by default**: a hard per-run
+  spending cap passed through to the spawned `claude` invocation. With
+  continuous churn as the default and no cap, cost is bounded only by how
+  long you leave the daemon running — worth turning this on if that matters
+  to you.
 - `--once` — run at most one cycle then exit, useful for testing.
 
 **Known limitation**: this process itself has to keep running for the
