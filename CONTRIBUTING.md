@@ -11,7 +11,7 @@ shipped*, see `CHANGELOG.md`.
 |---|---|
 | `src/*.ts` | The CLI (`cli.ts`) and its pure parsing logic (`roadmap.ts`, `feature-log.ts`, `recap.ts`, `stop-flag.ts`). Each has a matching `*.test.ts`. |
 | `workflows/nightly.js` | The nightly loop itself — a **Workflow-tool script**, not a plain Node file. See below. |
-| `.claude/commands/*.md` | Claude Code slash commands that wrap the CLI. |
+| `.claude/commands/*.md` | Claude Code slash commands: `status`/`recap`/`stop` wrap the CLI; `start` is a shortcut for asking Claude to invoke the `Workflow` tool directly (the CLI itself can't — see below). |
 | `ROADMAP.md` | The backlog: what's planned, in progress, or done. |
 | `CHANGELOG.md` | What's actually shipped, one entry per feature, tagged `(loop-shipped)` or `(hand-built)`. |
 | `VISION.md` / `RESEARCH.md` | Why the project exists and the research its design choices are based on. |

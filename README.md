@@ -68,6 +68,17 @@ If you're using Claude Code directly, `/feature-inventor-status`,
 `/feature-inventor-recap`, and `/feature-inventor-stop` wrap these same
 commands as slash commands (see `.claude/commands/`).
 
+### Starting a run
+
+There's no `feature-inventor start` CLI command — the CLI is a plain Node
+program and only the `Workflow` tool can actually execute
+`workflows/nightly.js`. In a Claude Code session you can just ask directly
+("run the nightly workflow") and it'll invoke the `Workflow` tool itself;
+`/feature-inventor-start` is a convenience shortcut for the same thing
+(optionally passing `maxFeatures`/`branchName`/`repoRoot`), not the only way
+to do it. Unattended scheduling via `CronCreate` is a separate, not-yet-wired
+path — see `ROADMAP.md`.
+
 Run the test suite and type-check the same way the loop does:
 
 ```sh
