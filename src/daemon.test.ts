@@ -1,12 +1,33 @@
 import { describe, expect, it } from "vitest";
 import {
   appendDaemonLogEntries,
+  extractSessionId,
   isRunDue,
   parseDaemonLogEntries,
   parseIntervalToMs,
   serializeDaemonLogEntry,
   type DaemonLogEntry,
 } from "./daemon.js";
+
+describe("extractSessionId", () => {
+  it("extracts the id from the observed 'backgrounded · <id>' format", () => {
+    const output = "backgrounded · f845d101\n  claude agents             list sessions\n";
+    expect(extractSessionId(output)).toBe("f845d101");
+  });
+
+  it("falls back to the 'claude stop <id>' line if 'backgrounded' isn't found", () => {
+    const output = "some unexpected preamble\n  claude stop f845d101      stop this session\n";
+    expect(extractSessionId(output)).toBe("f845d101");
+  });
+
+  it("returns null when neither pattern is present", () => {
+    expect(extractSessionId("nothing recognizable here")).toBeNull();
+  });
+
+  it("returns null for empty output", () => {
+    expect(extractSessionId("")).toBeNull();
+  });
+});
 
 describe("parseIntervalToMs", () => {
   it("parses seconds/minutes/hours/days", () => {

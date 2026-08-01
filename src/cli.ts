@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   parseBacklogCounts,
   parseChangelogEntries,
@@ -22,7 +23,16 @@ import {
   parseRecapState,
   serializeRecapState,
 } from "./recap.js";
-import { DAEMON_LOG_FILENAME, appendDaemonLogEntries, isRunDue, parseIntervalToMs, type DaemonLogEntry } from "./daemon.js";
+import {
+  DAEMON_LOG_FILENAME,
+  appendDaemonLogEntries,
+  extractSessionId,
+  isRunDue,
+  parseIntervalToMs,
+  type DaemonLogEntry,
+} from "./daemon.js";
+
+const execFileAsync = promisify(execFile);
 
 function readRequiredFile(repoRoot: string, filename: string): string {
   try {
@@ -319,6 +329,62 @@ export interface DaemonOptions {
   once?: boolean;
 }
 
+interface ClaudeAgentSummary {
+  id?: string;
+  cwd?: string;
+  startedAt?: number;
+  status?: string;
+  state?: string;
+  name?: string;
+}
+
+/**
+ * Best-effort short status line for the spawned session (name/status/state)
+ * via `claude agents --json`. Never throws — a failed or unparseable call
+ * just means no status line gets appended, not a broken poll loop.
+ */
+async function describeSpawnedSession(
+  repoRoot: string,
+  sessionId: string | null,
+  startedAtMs: number,
+): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("claude", ["agents", "--json", "--all"], { cwd: repoRoot });
+    const sessions = JSON.parse(stdout) as ClaudeAgentSummary[];
+    const match = sessionId
+      ? sessions.find((s) => s.id === sessionId)
+      : sessions.find(
+          (s) => s.cwd?.toLowerCase() === repoRoot.toLowerCase() && (s.startedAt ?? 0) >= startedAtMs,
+        );
+    if (!match) return null;
+    return `${match.name ?? "session"}: status=${match.status ?? "?"} state=${match.state ?? "?"}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetches the spawned session's full transcript via `claude logs <id>` —
+ * this is what actually shows the workflow's real decisions/phase
+ * transitions as they happen (skill loads, "Shipped (verified): ...", etc.),
+ * not just a status flag. Best-effort: returns null on any failure rather
+ * than throwing, since this is diagnostic output layered on top of the
+ * real completion signal (.feature-inventor-last-run.json), not a
+ * replacement for it. maxBuffer is generous since a long run's transcript
+ * can grow well past Node's 1MB execFile default.
+ */
+async function fetchSessionLogs(repoRoot: string, sessionId: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("claude", ["logs", sessionId], {
+      cwd: repoRoot,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return stdout;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Runs one cycle if a new run is due: spawns a headless Claude Code
  * invocation (`claude --bg`) and waits for it to actually finish, logging
@@ -357,34 +423,41 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
   }
   claudeArgs.push(DAEMON_RUN_PROMPT);
 
-  const spawnError = await new Promise<string | null>((resolve) => {
+  const spawnResult = await new Promise<{ error: string | null; output: string }>((resolve) => {
     const child = spawn("claude", claudeArgs, { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     child.stdout?.on("data", (chunk: Buffer) => (output += chunk.toString()));
     child.stderr?.on("data", (chunk: Buffer) => (output += chunk.toString()));
-    child.on("error", (err) => resolve(err instanceof Error ? err.message : String(err)));
+    child.on("error", (err) => resolve({ error: err instanceof Error ? err.message : String(err), output }));
     child.on("exit", (code) => {
       console.log(`[daemon] claude --bg exited (code ${code}). Output: ${output.trim() || "(none)"}`);
-      resolve(null);
+      resolve({ error: null, output });
     });
   });
 
-  if (spawnError) {
+  if (spawnResult.error) {
     const entry: DaemonLogEntry = {
       startedAt,
       finishedAt: new Date().toISOString(),
       outcome: "spawn-error",
-      detail: spawnError,
+      detail: spawnResult.error,
     };
     appendDaemonLog(repoRoot, entry);
-    console.log(`[daemon] Failed to spawn claude: ${spawnError}`);
+    console.log(`[daemon] Failed to spawn claude: ${spawnResult.error}`);
     return entry;
   }
 
+  const sessionId = extractSessionId(spawnResult.output);
   const timeoutMs = options.timeoutMs ?? DEFAULT_DAEMON_TIMEOUT_MS;
   const pollMs = options.pollMs ?? DEFAULT_DAEMON_POLL_MS;
   const deadline = Date.now() + timeoutMs;
   const startedAtMs = Date.parse(startedAt);
+  // Tracks how much of the session's transcript has already been printed,
+  // so each poll only prints the *new* portion -- an accumulating feed of
+  // what the workflow is actually doing (phase transitions, "Shipped
+  // (verified): ...", etc.), not a status line that overwrites itself and
+  // leaves nothing to scroll back through.
+  let previousLogs = "";
 
   while (Date.now() < deadline) {
     await sleep(pollMs);
@@ -399,6 +472,30 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
       );
       return entry;
     }
+
+    // Live feed: stream only what's new since the last poll. Purely
+    // informational -- never affects whether/when the loop considers the
+    // run done (that's still only .feature-inventor-last-run.json, above).
+    // Best-effort: a failed or unparseable `claude logs`/`claude agents`
+    // call just means a quieter poll, not a broken loop.
+    if (sessionId) {
+      const logs = await fetchSessionLogs(repoRoot, sessionId);
+      if (logs !== null) {
+        const newContent = logs.startsWith(previousLogs) ? logs.slice(previousLogs.length) : logs;
+        if (newContent.trim()) {
+          console.log(`[daemon] ── live feed (${sessionId}) ──\n${newContent.trim()}`);
+        }
+        previousLogs = logs;
+      }
+    }
+
+    const elapsedMin = Math.round((Date.now() - startedAtMs) / 60_000);
+    const remainingMin = Math.max(0, Math.round((deadline - Date.now()) / 60_000));
+    const sessionInfo = await describeSpawnedSession(repoRoot, sessionId, startedAtMs);
+    console.log(
+      `[daemon] still waiting (${elapsedMin}m elapsed, ~${remainingMin}m until timeout)` +
+        (sessionInfo ? ` — ${sessionInfo}` : ""),
+    );
   }
 
   const entry: DaemonLogEntry = {

@@ -8,6 +8,22 @@
 // process's own exit, or claude agents' JSON output — is the authoritative
 // signal that a cycle actually finished.
 
+/**
+ * Extracts the session id from `claude --bg`'s own stdout (observed format:
+ * "backgrounded · f845d101" followed by lines like "claude stop f845d101").
+ * Used so the daemon's poll loop can look up that exact session's live
+ * status via `claude agents --json` instead of guessing by cwd/recency.
+ * Returns null if the output doesn't match either pattern — the poll loop
+ * falls back to a cwd+recency match in that case, so this is best-effort,
+ * not required for correctness.
+ */
+export function extractSessionId(spawnOutput: string): string | null {
+  const backgroundedMatch = spawnOutput.match(/backgrounded[^\w]*([A-Za-z0-9]{4,})/i);
+  if (backgroundedMatch) return backgroundedMatch[1];
+  const stopMatch = spawnOutput.match(/claude stop\s+([A-Za-z0-9]{4,})/i);
+  return stopMatch ? stopMatch[1] : null;
+}
+
 /** Parses a duration like "30m", "12h", or "1d" into milliseconds. */
 export function parseIntervalToMs(spec: string): number {
   const match = spec.trim().match(/^(\d+(?:\.\d+)?)\s*(s|m|h|d)$/i);

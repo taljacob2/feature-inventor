@@ -82,14 +82,30 @@ isn't: it spawns a real `claude` process and waits on real wall-clock time.
 
 Design notes worth knowing before touching this:
 
-- **The spawned process's exit is never trusted as proof a run finished.**
-  The `Workflow` tool returns immediately and finishes its spawned agents
-  later — confirmed by this project's own first real run — and whether a
-  headless `claude --bg` invocation's process lifetime spans that later
-  completion isn't verified either way. The authoritative signal is
-  `.feature-inventor-last-run.json`'s `completedAt` actually advancing past
-  the cycle's start time; `claude --bg`'s own exit is just logged for
-  diagnostics.
+- **The spawned process's exit is never trusted as proof a run finished** —
+  even though real evidence now confirms `claude --bg` does wait: its own
+  transcript (`claude logs <id>`) showed "Waiting for 1 dynamic workflow to
+  finish" and later "Dynamic workflow ... completed · 12m 13s" for a real
+  run. Still kept as a poll on `.feature-inventor-last-run.json`'s
+  `completedAt`, not the process's exit, as the authoritative signal —
+  belt-and-suspenders is cheap here, and a single confirmed case isn't proof
+  it always waits (e.g. under a capacity/rate-limit failure, which has also
+  now been observed for real — see `CHANGELOG.md`'s "mid-run capacity
+  failure" entry, where the run never reached the point of writing that
+  file at all).
+- **Running the daemon against a repo you're also actively editing
+  interactively is unsafe — no isolation exists.** `nightly.js`'s Implement
+  phase does `git checkout "${BRANCH_NAME}"` in whatever directory it's
+  invoked from, which is this exact repo's working directory when the
+  daemon spawns `claude --bg` from inside it — identical to the one an
+  interactive session editing this repo is also using. This is not
+  hypothetical: it happened live while building this feature (see
+  `CHANGELOG.md`). That time, the background agent found uncommitted
+  changes and safely `git stash`'d them before proceeding — good behavior,
+  but a judgment call by that agent, not a safeguard this codebase
+  provides. A real fix (a separate clone or `isolation: 'worktree'`) is not
+  built; until it is, don't run `feature-inventor daemon` against a repo
+  you're simultaneously editing in another session.
 - **This is feature-inventor's own scheduler, deliberately not the OS's and
   deliberately not Claude Code's `CronCreate`.** `CronCreate` jobs are
   session-only (gone if the Claude Code session ends), auto-expire after 7
