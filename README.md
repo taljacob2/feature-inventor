@@ -32,10 +32,27 @@ feature-inventor status
 `npm start -- status` during development.)
 
 `status` prints:
+- **Last run** — where the most recent run left off: confirmation nothing
+  was cut mid-feature, shipped/abandoned/not-attempted counts, and (if any)
+  the titles of already-researched, already-ICE-scored candidates that
+  didn't get attempted — so you can see they were carried into `ROADMAP.md`
+  rather than lost, even if that run stopped early. Only shown once a run
+  has actually completed.
 - **Up next** — the current "Now" items from `ROADMAP.md`.
+- **Backlog** — open-item counts for the Next/Later/Horizon sections, so you
+  can see the backlog's shape at a glance.
 - **Recently shipped** — the last few entries from `CHANGELOG.md`.
 - **Recent feature attempts** — the last few records from `feature-log.jsonl`
-  (title, ICE score, and outcome), once the loop has run at least once.
+  (title, ICE score, and outcome), once the loop has run at least once. Each
+  line also shows an `[autonomy N/10]` score when self-assessment data exists
+  for it — a rough, deterministic read (not a trained model) of how much
+  that attempt leaned on inference/assumptions the agent couldn't fully
+  verify, versus being cleanly spec'd and testable from what's already in
+  the repo.
+- **Calibration** — across all logged attempts: average predicted ICE
+  confidence per outcome (shipped/abandoned/reverted), plus a hallucination
+  rate — the fraction of self-reported-"confident" features that were later
+  reverted anyway.
 - Whether a graceful stop is currently pending (see below).
 
 Add `--json` for machine-readable output (same data, no section headers).
@@ -97,21 +114,34 @@ Each run (`workflows/nightly.js`) walks the same loop described in
 1. **Research** — gather candidate features from the existing code/docs,
    comparable tools, and (once there's usage) real feedback.
 2. **Prioritize** — score candidates with ICE (Impact/Confidence/Ease, see
-   `RESEARCH.md` §3) and rank deterministically; cheap, high-value work goes
-   first.
+   `RESEARCH.md` §3) and rank deterministically. Kept candidates also get a
+   pairwise "collision rate" estimate (predicted file/logic overlap), used to
+   order the queue by ICE tier and then by lowest collision within a tier —
+   this only affects ordering today, since features are still implemented
+   strictly one at a time (see "Not built yet" below).
 3. **Implement** — build one feature at a time, writing/running real tests
    before calling anything done. A feature that turns out harder or riskier
    than its Ease score suggested is abandoned rather than forced through.
+   `TaskList`/`TaskGet` show real-time per-feature progress (pending →
+   in_progress → completed) while a run is in flight.
 4. **Verify** — a second, independent pass re-runs tests and inspects the
    diff before a feature is trusted as "shipped"; anything that doesn't hold
    up is reverted with `git revert` (keeping the audit trail) rather than
    silently discarded.
 5. **Finalize** — `CHANGELOG.md` gets one entry per shipped feature,
    `ROADMAP.md` is refreshed (items re-prioritized, at least one new horizon
-   item added), and every attempt (shipped, abandoned, or reverted) is
-   appended to `feature-log.jsonl`.
+   item added), every attempt (shipped, abandoned, or reverted, plus a
+   self-assessment of how it went) is appended to `feature-log.jsonl`, and a
+   push notification summarizes the run. `status`'s "Last run" section reads
+   back the same summary afterward.
 
 All of this happens on a disposable `nightly` branch — the loop never
 touches `main`/`master` and never pushes to a remote. A human still reviews
 and merges before anything reaches production; see VISION.md's "harness, not
 dark factory" section for why that boundary is load-bearing.
+
+**Not built yet:** running low-collision features in parallel (only the
+scoring/ordering above exists so far — the Implement loop is still strictly
+sequential), and any output mode besides committing straight to the branch
+(`args.outputMode` accepts other values but errors out rather than
+half-implementing them — see `ROADMAP.md`).
