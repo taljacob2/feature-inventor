@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { printStatus } from "./cli.js";
+import type { StatusData } from "./cli.js";
 
 describe("printStatus", () => {
   let dir: string;
@@ -122,5 +123,55 @@ describe("printStatus", () => {
     expect(secondIndex).toBeGreaterThan(firstIndex);
     expect(output).toContain("[shipped] First feature — ICE 7.7 (abc1234)");
     expect(output).toContain("[abandoned] Second feature — ICE 3.0");
+  });
+
+  it("emits parseable JSON with the parsed status data when --json is passed", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n",
+    );
+    writeFileSync(
+      join(dir, "CHANGELOG.md"),
+      "# Changelog\n\n## 2026-08-01 — Something shipped\n- Notes\n",
+    );
+    writeFileSync(
+      join(dir, "feature-log.jsonl"),
+      JSON.stringify({
+        date: "2026-08-01",
+        title: "First feature",
+        ice: { impact: 6, confidence: 8, ease: 9, composite: 7.7 },
+        status: "shipped",
+        commitSha: "abc1234",
+      }) + "\n",
+    );
+
+    printStatus(dir, { json: true });
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const [output] = logSpy.mock.calls[0] as [string];
+    const parsed = JSON.parse(output) as StatusData;
+
+    expect(parsed.nowItems).toEqual(["Something — S/S — why"]);
+    expect(parsed.recentShipped).toEqual(["2026-08-01 — Something shipped"]);
+    expect(parsed.recentAttempts).toHaveLength(1);
+    expect(parsed.recentAttempts[0]).toMatchObject({
+      title: "First feature",
+      status: "shipped",
+      commitSha: "abc1234",
+    });
+  });
+
+  it("does not print human-readable section headers when --json is passed", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+
+    printStatus(dir, { json: true });
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).not.toContain("Feature Inventor — status");
+    expect(output).not.toContain("Up next");
   });
 });
