@@ -276,23 +276,44 @@ phase('Implement')
 const shipped = []
 const abandoned = []
 let stoppedEarly = false
+// Distinct from stoppedEarly's boolean: this records *why* the Implement
+// loop stopped short of its full queue, so Finalize (and, per ROADMAP.md's
+// resume-point item, a future `status`/`recap` view) can tell "ran out of
+// candidates" apart from "hit the per-run cap" apart from "human asked to
+// stop" — all three currently collapse into the same stoppedEarly=true/false
+// signal, which isn't enough to explain what actually happened.
+let stopReason = null // 'max-features-reached' | 'explicit-stop' | null (queue exhausted normally)
 const queue = orderedFeatures.slice(0, MAX_ATTEMPTS)
 if (orderedFeatures.length > MAX_ATTEMPTS) {
   log(`${orderedFeatures.length - MAX_ATTEMPTS} lower-priority candidate(s) not attempted this run — carried forward via the roadmap update.`)
 }
 
+// Tracks how far into `queue` the loop actually got, so "candidates not
+// attempted" can be computed accurately below. Previously this was derived
+// solely from `orderedFeatures.slice(queue.length)`, which only accounts for
+// candidates beyond MAX_ATTEMPTS — it silently missed queued candidates
+// dropped by an early break (MAX_FEATURES_PER_RUN or an explicit stop
+// request), so already-researched-and-ICE-scored work could vanish from the
+// reevaluation step's context instead of being carried forward into
+// ROADMAP.md. See ROADMAP.md's "Bug: ... under-reports 'candidates not
+// attempted'" item.
+let attemptedCount = 0
+
 for (const feature of queue) {
   if (shipped.length >= MAX_FEATURES_PER_RUN) {
     log(`Reached ${MAX_FEATURES_PER_RUN} shipped features for this run — stopping.`)
+    stopReason = 'max-features-reached'
     break
   }
 
   if (await isStopRequested()) {
     log('Stop requested (via "feature-inventor stop") — wrapping up gracefully instead of starting another feature.')
     stoppedEarly = true
+    stopReason = 'explicit-stop'
     break
   }
 
+  attemptedCount++
   const iceScore = computeIceScore(feature)
 
   const result = await agent(
@@ -407,6 +428,12 @@ Do not push to any remote.`,
   }
 }
 
+// Accurate regardless of *why* the loop stopped short: candidates still
+// sitting in the queue past attemptedCount (dropped by an early break) plus
+// anything beyond MAX_ATTEMPTS entirely. Each keeps its already-computed ICE
+// fields so Finalize can carry them into ROADMAP.md without re-deriving them.
+const notAttempted = [...queue.slice(attemptedCount), ...orderedFeatures.slice(queue.length)]
+
 phase('Finalize')
 const reevaluation = await agent(
   `You are the end-of-run re-evaluation step for feature-inventor (${REPO_ROOT}), on branch
@@ -414,7 +441,9 @@ const reevaluation = await agent(
 
 Shipped this run: ${JSON.stringify(shipped.map(s => ({ title: s.feature.title, summary: s.result.summary, commitSha: s.result.commitSha, iceScore: computeIceScore(s.feature), verificationConcerns: s.verification?.concerns })), null, 2)}
 Abandoned this run: ${JSON.stringify(abandoned.map(a => ({ title: a.feature.title, reason: a.reason })), null, 2)}
-Candidates not attempted: ${JSON.stringify(orderedFeatures.slice(queue.length).map(f => f.title))}
+Candidates not attempted this run (each already ICE-scored — reflect these back into ROADMAP.md's
+Now/Next sections with their existing scores rather than dropping or re-deriving them): ${JSON.stringify(notAttempted.map(f => ({ title: f.title, impact: f.impact, confidence: f.confidence, ease: f.ease })), null, 2)}
+Why the run stopped short of the full queue (if it did): ${stopReason || 'it did not — every queued candidate was attempted'}
 
 Do the following, in order:
 1. Reflect honestly: were the priority calls this run actually right in hindsight? Did any
@@ -434,6 +463,6 @@ Do not push to any remote.`,
 
 await clearStopFlagIfPresent()
 
-log(`Run complete: ${shipped.length} shipped, ${abandoned.length} abandoned.${stoppedEarly ? ' (stopped early by request)' : ''}`)
+log(`Run complete: ${shipped.length} shipped, ${abandoned.length} abandoned, ${notAttempted.length} not attempted.${stopReason ? ` (stopped: ${stopReason})` : ''}`)
 
-return { shipped, abandoned, reevaluation, stoppedEarly }
+return { shipped, abandoned, reevaluation, stoppedEarly, stopReason, notAttempted: notAttempted.map(f => f.title) }

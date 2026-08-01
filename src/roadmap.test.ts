@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseChangelogEntries, parseNowSection } from "./roadmap.js";
+import { parseBacklogCounts, parseChangelogEntries, parseNowSection } from "./roadmap.js";
 
 const SAMPLE_ROADMAP = `# Roadmap
 
@@ -64,6 +64,53 @@ describe("parseNowSection", () => {
 ## Next
 `;
     expect(parseNowSection(mixed)).toEqual(["Still open item"]);
+  });
+});
+
+describe("parseBacklogCounts", () => {
+  it("counts open items in Next/Later/Horizon without confusing a colliding heading", () => {
+    // "## Next Steps" sits right where a bare word-boundary match on "## Next"
+    // would false-match it (a space is a word boundary too) — this is the
+    // exact fixture the ROADMAP.md retry note asked for.
+    const roadmapWithCollision = `# Roadmap
+
+## Now
+
+- [ ] Do the first thing — S/M — why it matters
+
+## Next
+
+- [ ] Real next item one — M/M — why
+- [ ] Real next item two — M/M — why
+- [x] Already done, doesn't count
+
+## Next Steps
+
+- [ ] This belongs to an unrelated heading and must not be counted as "Next"
+
+## Later (harder, uncertain effort)
+
+- [ ] One later item — L/L — why
+
+## Horizon (speculative)
+
+- [ ] One horizon item — why
+- [ ] Another horizon item — why
+`;
+
+    expect(parseBacklogCounts(roadmapWithCollision)).toEqual({
+      next: 2,
+      later: 1,
+      horizon: 2,
+    });
+  });
+
+  it("returns zero counts when a section is absent", () => {
+    expect(parseBacklogCounts("# Roadmap\n\n## Now\n\n- [ ] Something\n")).toEqual({
+      next: 0,
+      later: 0,
+      horizon: 0,
+    });
   });
 });
 

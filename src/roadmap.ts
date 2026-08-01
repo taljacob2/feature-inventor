@@ -2,8 +2,26 @@ function stripFencedCodeBlocks(markdown: string): string {
   return markdown.replace(/```[\s\S]*?```/g, "");
 }
 
-export function parseNowSection(roadmapMd: string): string[] {
-  const match = stripFencedCodeBlocks(roadmapMd).match(/## Now\b[^\n]*\n([\s\S]*?)(?=\n## |\n?$)/);
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Extracts the open (unchecked) list items from a `## <sectionName>` section.
+ *
+ * The heading match requires that, after the section name, the line either
+ * ends immediately or continues into a parenthetical suffix like
+ * `## Now (this run's candidates, cheapest first)` — not a bare `\b` word
+ * boundary. A word boundary alone would let `## Next` false-match the start
+ * of an unrelated `## Next Steps` heading (a space is also a word boundary),
+ * silently returning the wrong section's items. See ROADMAP.md's "Bug: ...
+ * backlog section counts" retry note for the incident this fixes.
+ */
+function parseSection(markdown: string, sectionName: string): string[] {
+  const headingPattern = new RegExp(
+    `## ${escapeRegExp(sectionName)}(?:[ \\t]*\\([^\\n]*)?[ \\t]*\\n([\\s\\S]*?)(?=\\n## |\\n?$)`,
+  );
+  const match = stripFencedCodeBlocks(markdown).match(headingPattern);
   if (!match) return [];
 
   const items: string[] = [];
@@ -24,6 +42,25 @@ export function parseNowSection(roadmapMd: string): string[] {
     }
   }
   return items;
+}
+
+export function parseNowSection(roadmapMd: string): string[] {
+  return parseSection(roadmapMd, "Now");
+}
+
+export interface BacklogCounts {
+  next: number;
+  later: number;
+  horizon: number;
+}
+
+/** Counts of open (unchecked) items in the Next/Later/Horizon sections. */
+export function parseBacklogCounts(roadmapMd: string): BacklogCounts {
+  return {
+    next: parseSection(roadmapMd, "Next").length,
+    later: parseSection(roadmapMd, "Later").length,
+    horizon: parseSection(roadmapMd, "Horizon").length,
+  };
 }
 
 export function parseChangelogEntries(changelogMd: string, limit = 5): string[] {

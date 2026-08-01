@@ -198,6 +198,24 @@ describe("printStatus", () => {
     expect(parsed.stopRequestedAt).toBe("2026-08-01T12:00:00.000Z");
   });
 
+  it("shows backlog counts for Next/Later/Horizon in text and JSON output", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n\n" +
+        "## Next\n\n- [ ] A\n- [ ] B\n\n## Later\n\n- [ ] C\n\n## Horizon\n\n- [ ] D\n- [ ] E\n- [ ] F\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+
+    printStatus(dir);
+    const textOutput = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(textOutput).toContain("Backlog: 2 in Next, 1 in Later, 3 in Horizon.");
+
+    logSpy.mockClear();
+    printStatus(dir, { json: true });
+    const parsed = JSON.parse(logSpy.mock.calls[0]![0] as string) as StatusData;
+    expect(parsed.backlogCounts).toEqual({ next: 2, later: 1, horizon: 3 });
+  });
+
   it("omits the stop-request notice when no stop is pending", () => {
     writeFileSync(
       join(dir, "ROADMAP.md"),

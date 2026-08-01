@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseChangelogEntries, parseNowSection } from "./roadmap.js";
+import { parseBacklogCounts, parseChangelogEntries, parseNowSection, type BacklogCounts } from "./roadmap.js";
 import { parseFeatureLogEntries, type FeatureLogEntry } from "./feature-log.js";
 import { STOP_FLAG_FILENAME, parseStopFlag, serializeStopFlag } from "./stop-flag.js";
 import {
@@ -38,6 +38,7 @@ function readOptionalFile(repoRoot: string, filename: string): string | null {
 
 export interface StatusData {
   nowItems: string[];
+  backlogCounts: BacklogCounts;
   recentShipped: string[];
   recentAttempts: FeatureLogEntry[];
   /** ISO 8601 timestamp if a `feature-inventor stop` request is pending, else null. */
@@ -55,6 +56,7 @@ export function getStatusData(repoRoot: string): StatusData {
   const changelog = readRequiredFile(repoRoot, "CHANGELOG.md");
 
   const nowItems = parseNowSection(roadmap);
+  const backlogCounts = parseBacklogCounts(roadmap);
   const recentShipped = parseChangelogEntries(changelog, 5);
 
   const featureLogContent = readOptionalFile(repoRoot, "feature-log.jsonl");
@@ -69,7 +71,7 @@ export function getStatusData(repoRoot: string): StatusData {
     stopRequestedAt = parsed ? parsed.requestedAt : "(unknown time)";
   }
 
-  return { nowItems, recentShipped, recentAttempts, stopRequestedAt };
+  return { nowItems, backlogCounts, recentShipped, recentAttempts, stopRequestedAt };
 }
 
 export function printStatus(repoRoot: string, options: { json?: boolean } = {}): void {
@@ -80,7 +82,7 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
     return;
   }
 
-  const { nowItems, recentShipped, recentAttempts, stopRequestedAt } = data;
+  const { nowItems, backlogCounts, recentShipped, recentAttempts, stopRequestedAt } = data;
 
   console.log("Feature Inventor — status\n");
 
@@ -97,6 +99,10 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
   } else {
     for (const item of nowItems) console.log(`  - ${item}`);
   }
+
+  console.log(
+    `\nBacklog: ${backlogCounts.next} in Next, ${backlogCounts.later} in Later, ${backlogCounts.horizon} in Horizon.`,
+  );
 
   console.log("\nRecently shipped:");
   if (recentShipped.length === 0) {
