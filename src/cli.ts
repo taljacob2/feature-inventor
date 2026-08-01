@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseChangelogEntries, parseNowSection } from "./roadmap.js";
+import { parseFeatureLogEntries } from "./feature-log.js";
 
 function readRequiredFile(repoRoot: string, filename: string): string {
   try {
@@ -11,6 +12,19 @@ function readRequiredFile(repoRoot: string, filename: string): string {
     const reason = err instanceof Error ? err.message : String(err);
     console.error(`Error: could not read ${filename} (${reason})`);
     process.exit(1);
+  }
+}
+
+/**
+ * feature-log.jsonl is optional: it doesn't exist until the nightly loop has
+ * completed at least one Implement phase, so its absence is not an error
+ * the way a missing ROADMAP.md/CHANGELOG.md is.
+ */
+function readOptionalFile(repoRoot: string, filename: string): string | null {
+  try {
+    return readFileSync(join(repoRoot, filename), "utf8");
+  } catch {
+    return null;
   }
 }
 
@@ -35,6 +49,21 @@ export function printStatus(repoRoot: string): void {
     console.log("  (nothing yet — no nightly run has completed)");
   } else {
     for (const entry of recentShipped) console.log(`  - ${entry}`);
+  }
+
+  const featureLogContent = readOptionalFile(repoRoot, "feature-log.jsonl");
+  const recentAttempts = featureLogContent
+    ? parseFeatureLogEntries(featureLogContent).slice(-5).reverse()
+    : [];
+
+  console.log("\nRecent feature attempts:");
+  if (recentAttempts.length === 0) {
+    console.log("  (none recorded yet — see feature-log.jsonl once the loop has run)");
+  } else {
+    for (const entry of recentAttempts) {
+      const suffix = entry.commitSha ? ` (${entry.commitSha})` : "";
+      console.log(`  - [${entry.status}] ${entry.title} — ICE ${entry.ice.composite.toFixed(1)}${suffix}`);
+    }
   }
 }
 

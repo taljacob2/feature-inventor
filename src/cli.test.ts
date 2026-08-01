@@ -72,4 +72,55 @@ describe("printStatus", () => {
     expect(exitSpy).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalled();
   });
+
+  it("shows a placeholder for recent feature attempts when feature-log.jsonl is absent", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+
+    printStatus(dir);
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("Recent feature attempts:");
+    expect(output).toContain("(none recorded yet");
+  });
+
+  it("prints recent feature attempts most-recent-first when feature-log.jsonl exists", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+    writeFileSync(
+      join(dir, "feature-log.jsonl"),
+      [
+        JSON.stringify({
+          date: "2026-08-01",
+          title: "First feature",
+          ice: { impact: 6, confidence: 8, ease: 9, composite: 7.7 },
+          status: "shipped",
+          commitSha: "abc1234",
+        }),
+        JSON.stringify({
+          date: "2026-08-02",
+          title: "Second feature",
+          ice: { impact: 3, confidence: 4, ease: 2, composite: 3 },
+          status: "abandoned",
+          reason: "too risky",
+        }),
+      ].join("\n") + "\n",
+    );
+
+    printStatus(dir);
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    const firstIndex = output.indexOf("Second feature");
+    const secondIndex = output.indexOf("First feature");
+    expect(firstIndex).toBeGreaterThan(-1);
+    expect(secondIndex).toBeGreaterThan(firstIndex);
+    expect(output).toContain("[shipped] First feature — ICE 7.7 (abc1234)");
+    expect(output).toContain("[abandoned] Second feature — ICE 3.0");
+  });
 });
