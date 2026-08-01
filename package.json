@@ -1,0 +1,20 @@
+{
+  "name": "feature-inventor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A self-hosted, self-growing nightly feature-building loop.",
+  "bin": {
+    "feature-inventor": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
