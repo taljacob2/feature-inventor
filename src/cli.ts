@@ -1,11 +1,22 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseChangelogEntries, parseNowSection } from "./roadmap.js";
 
-function printStatus(repoRoot: string): void {
-  const roadmap = readFileSync(join(repoRoot, "ROADMAP.md"), "utf8");
-  const changelog = readFileSync(join(repoRoot, "CHANGELOG.md"), "utf8");
+function readRequiredFile(repoRoot: string, filename: string): string {
+  try {
+    return readFileSync(join(repoRoot, filename), "utf8");
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(`Error: could not read ${filename} (${reason})`);
+    process.exit(1);
+  }
+}
+
+export function printStatus(repoRoot: string): void {
+  const roadmap = readRequiredFile(repoRoot, "ROADMAP.md");
+  const changelog = readRequiredFile(repoRoot, "CHANGELOG.md");
 
   const nowItems = parseNowSection(roadmap);
   const recentShipped = parseChangelogEntries(changelog, 5);
@@ -27,14 +38,20 @@ function printStatus(repoRoot: string): void {
   }
 }
 
-const [, , command] = process.argv;
+function main(): void {
+  const [, , command] = process.argv;
 
-switch (command ?? "status") {
-  case "status":
-    printStatus(process.cwd());
-    break;
-  default:
-    console.error(`Unknown command: ${command}`);
-    console.error("Usage: feature-inventor [status]");
-    process.exit(1);
+  switch (command ?? "status") {
+    case "status":
+      printStatus(process.cwd());
+      break;
+    default:
+      console.error(`Unknown command: ${command}`);
+      console.error("Usage: feature-inventor [status]");
+      process.exit(1);
+  }
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main();
 }
