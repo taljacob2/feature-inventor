@@ -48,6 +48,15 @@ export function parseNowSection(roadmapMd: string): string[] {
   return parseSection(roadmapMd, "Now");
 }
 
+/**
+ * Extracts the open (unchecked) item titles from the Next section, in
+ * document order. Used by `status` to preview upcoming work when the Now
+ * section is empty (see `printStatus`'s "Up next" block).
+ */
+export function parseNextSection(roadmapMd: string): string[] {
+  return parseSection(roadmapMd, "Next");
+}
+
 export interface BacklogCounts {
   next: number;
   later: number;

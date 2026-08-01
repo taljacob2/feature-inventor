@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBacklogCounts, parseChangelogEntries, parseNowSection } from "./roadmap.js";
+import { parseBacklogCounts, parseChangelogEntries, parseNextSection, parseNowSection } from "./roadmap.js";
 
 const SAMPLE_ROADMAP = `# Roadmap
 
@@ -64,6 +64,30 @@ describe("parseNowSection", () => {
 ## Next
 `;
     expect(parseNowSection(mixed)).toEqual(["Still open item"]);
+  });
+});
+
+describe("parseNextSection", () => {
+  it("extracts open item titles from the Next section, in document order", () => {
+    expect(parseNextSection(SAMPLE_ROADMAP)).toEqual(["Do a later thing — M/M — why it matters"]);
+  });
+
+  it("returns an empty array when there is no Next section", () => {
+    expect(parseNextSection("# Roadmap\n\n## Now\n\n- [ ] Something\n")).toEqual([]);
+  });
+
+  it("excludes checked items", () => {
+    const roadmap = `# Roadmap
+
+## Now
+
+## Next
+
+- [x] Already shipped
+- [ ] Still open one
+- [ ] Still open two
+`;
+    expect(parseNextSection(roadmap)).toEqual(["Still open one", "Still open two"]);
   });
 });
 

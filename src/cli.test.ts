@@ -199,6 +199,56 @@ describe("printStatus", () => {
     expect(parsed.stopRequestedAt).toBe("2026-08-01T12:00:00.000Z");
   });
 
+  it("previews top Next-section titles when the Now section is empty", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [x] Already done\n\n" +
+        "## Next\n\n- [ ] First upcoming thing\n- [ ] Second upcoming thing\n- [ ] Third upcoming thing\n- [ ] Fourth upcoming thing\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+
+    printStatus(dir);
+    const textOutput = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(textOutput).toContain("Up next (0):");
+    expect(textOutput).toContain("previewing top of Next");
+    expect(textOutput).toContain("First upcoming thing");
+    expect(textOutput).toContain("Second upcoming thing");
+    expect(textOutput).toContain("Third upcoming thing");
+    expect(textOutput).not.toContain("Fourth upcoming thing");
+
+    logSpy.mockClear();
+    printStatus(dir, { json: true });
+    const parsed = JSON.parse(logSpy.mock.calls[0]![0] as string) as StatusData;
+    expect(parsed.nowItems).toEqual([]);
+    expect(parsed.nextPreview).toEqual([
+      "First upcoming thing",
+      "Second upcoming thing",
+      "Third upcoming thing",
+    ]);
+  });
+
+  it("falls back to the plain placeholder when both Now and Next are empty", () => {
+    writeFileSync(join(dir, "ROADMAP.md"), "# Roadmap\n\n## Now\n\n## Next\n");
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+
+    printStatus(dir);
+    const textOutput = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(textOutput).toContain("(none — ROADMAP.md's Now section is empty)");
+    expect(textOutput).not.toContain("previewing top of Next");
+  });
+
+  it("does not populate nextPreview when the Now section already has items", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n\n## Next\n\n- [ ] Later thing\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+
+    printStatus(dir, { json: true });
+    const parsed = JSON.parse(logSpy.mock.calls[0]![0] as string) as StatusData;
+    expect(parsed.nextPreview).toEqual([]);
+  });
+
   it("shows backlog counts for Next/Later/Horizon in text and JSON output", () => {
     writeFileSync(
       join(dir, "ROADMAP.md"),

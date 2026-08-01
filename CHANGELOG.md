@@ -31,6 +31,31 @@ Format per entry:
 - Notes from re-evaluation:
 ```
 
+## 2026-08-01 — Preview upcoming Next-section titles in `status` when Now is empty (hand-built)
+
+- Effort/value estimate vs actual: ICE 7/7/8 (composite 7.3) — matched; the
+  needed section-parsing logic (`parseSection`, already used for
+  `parseBacklogCounts`) was reused as-is via a new `parseNextSection` export,
+  with only `printStatus`'s "Up next" block and `StatusData` changed.
+- Sanity checks: pass — `npm test` (84/84 tests, including 3 new
+  `roadmap.test.ts` cases for `parseNextSection` and 3 new `cli.test.ts` cases
+  covering the Next preview, the both-empty fallback, and the
+  Now-non-empty no-op) and `npm run build` both green.
+- Commit: this commit
+- Notes from re-evaluation: `printStatus`'s "Up next" block previously only
+  read ROADMAP.md's Now section and printed a bare
+  "(none — ROADMAP.md's Now section is empty)" placeholder whenever it was
+  empty, even if the Next section still had plenty queued up. Added an
+  exported `parseNextSection(roadmapMd)` to `roadmap.ts` (a thin wrapper
+  around the existing `parseSection` helper, mirroring `parseNowSection`),
+  and a `nextPreview` field on `StatusData` populated with up to the top 3
+  open Next-section titles, but only when `nowItems` is empty. When
+  `printStatus` renders and `nowItems` is empty, it now checks `nextPreview`:
+  if it has entries, it prints an updated placeholder plus the preview
+  titles; otherwise it falls back to the original plain placeholder (both
+  sections genuinely empty). `--json` output carries `nextPreview` the same
+  way as the other `StatusData` fields, so both output modes stay in sync.
+
 ## 2026-08-01 — `--help`/`-h` and `--version`/`-v` flags on the CLI (hand-built)
 
 - Effort/value estimate vs actual: ICE 5/8/9 (composite 7.3) — matched; a

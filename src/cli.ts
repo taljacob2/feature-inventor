@@ -2,7 +2,13 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseBacklogCounts, parseChangelogEntries, parseNowSection, type BacklogCounts } from "./roadmap.js";
+import {
+  parseBacklogCounts,
+  parseChangelogEntries,
+  parseNextSection,
+  parseNowSection,
+  type BacklogCounts,
+} from "./roadmap.js";
 import { parseFeatureLogEntries, type FeatureLogEntry } from "./feature-log.js";
 import { computeCalibrationStats, type CalibrationStats } from "./calibration.js";
 import { computeAutonomyScore } from "./autonomy.js";
@@ -39,8 +45,17 @@ function readOptionalFile(repoRoot: string, filename: string): string | null {
   }
 }
 
+/** How many Next-section titles to preview when the Now section is empty. */
+const NEXT_PREVIEW_LIMIT = 3;
+
 export interface StatusData {
   nowItems: string[];
+  /**
+   * Top titles from ROADMAP.md's Next section, populated only when nowItems
+   * is empty — a preview so a check-in right after clearing the backlog
+   * still shows something concrete instead of an uninformative placeholder.
+   */
+  nextPreview: string[];
   backlogCounts: BacklogCounts;
   recentShipped: string[];
   recentAttempts: FeatureLogEntry[];
@@ -63,6 +78,7 @@ export function getStatusData(repoRoot: string): StatusData {
   const changelog = readRequiredFile(repoRoot, "CHANGELOG.md");
 
   const nowItems = parseNowSection(roadmap);
+  const nextPreview = nowItems.length === 0 ? parseNextSection(roadmap).slice(0, NEXT_PREVIEW_LIMIT) : [];
   const backlogCounts = parseBacklogCounts(roadmap);
   const recentShipped = parseChangelogEntries(changelog, 5);
 
@@ -81,7 +97,16 @@ export function getStatusData(repoRoot: string): StatusData {
   const runSummaryContent = readOptionalFile(repoRoot, RUN_SUMMARY_FILENAME);
   const lastRun = runSummaryContent ? parseRunSummary(runSummaryContent) : null;
 
-  return { nowItems, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt, lastRun };
+  return {
+    nowItems,
+    nextPreview,
+    backlogCounts,
+    recentShipped,
+    recentAttempts,
+    calibration,
+    stopRequestedAt,
+    lastRun,
+  };
 }
 
 export function printStatus(repoRoot: string, options: { json?: boolean } = {}): void {
@@ -92,7 +117,8 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
     return;
   }
 
-  const { nowItems, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt, lastRun } = data;
+  const { nowItems, nextPreview, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt, lastRun } =
+    data;
 
   console.log("Feature Inventor — status\n");
 
@@ -125,7 +151,12 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
 
   console.log(`Up next (${nowItems.length}):`);
   if (nowItems.length === 0) {
-    console.log("  (none — ROADMAP.md's Now section is empty)");
+    if (nextPreview.length > 0) {
+      console.log("  (none — ROADMAP.md's Now section is empty; previewing top of Next)");
+      for (const item of nextPreview) console.log(`  - ${item}`);
+    } else {
+      console.log("  (none — ROADMAP.md's Now section is empty)");
+    }
   } else {
     for (const item of nowItems) console.log(`  - ${item}`);
   }
