@@ -140,9 +140,19 @@ command. See `--max-budget-usd` below if you want a hard ceiling on that
 before you turn it on.
 
 ```sh
-claude setup-token          # one-time: long-lived auth so scheduled runs don't need an interactive login
 feature-inventor daemon --yolo
 ```
+
+**Auth**: if you're already logged in on this machine (check with
+`claude auth status`), that's enough — the same login carries through to the
+headless `claude --bg` calls the daemon spawns, no extra setup needed.
+`claude setup-token` (a separate, longer-lived credential) is only for a
+machine that's never done an interactive login at all — a fresh CI runner or
+headless server, not a normal dev machine you already use Claude Code on. If
+the daemon ever starts silently failing to authenticate after running for a
+long stretch (days/weeks), that's the first thing to check — an interactive
+session's credential may not last as long as a dedicated token; re-run
+`claude auth login` (or set up a token at that point) to refresh it.
 
 `feature-inventor daemon` is a long-running process that decides on its own
 when a run is due (based on `.feature-inventor-last-run.json`'s timestamp)

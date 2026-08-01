@@ -121,9 +121,13 @@ Design notes worth knowing before touching this:
   `claude stop <id>` it afterward — rather than trusting a PATH override
   actually redirected anything.
 
-One-time setup for actually running this unattended: `claude setup-token`
-sets up a long-lived auth token so a scheduled run doesn't need an
-interactive login each time.
+Auth: an existing interactive login (`claude auth status`) on the machine
+running the daemon is sufficient — confirmed by testing `claude -p "..."`
+without `setup-token` and it working. `claude setup-token` is only needed on
+a machine that's never done an interactive login at all (a fresh CI runner
+or headless server); don't present it as a required step for a normal dev
+machine (see `README.md`'s "Running unattended" section — this was corrected
+after initially over-stating it as a required one-time setup step).
 
 ## Recording what shipped
 
