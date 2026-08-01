@@ -124,6 +124,81 @@ committed to git, so deleting it needs no commit. If it doesn't exist, do nothin
   )
 }
 
+// PushNotification (like TaskCreate/TaskUpdate below) is only reachable by a
+// spawned agent, not the script body itself — so a run-completion summary is
+// delegated the same way appendFeatureLogEntry and the stop-flag checks are.
+// A completed unattended overnight run is exactly the "they've walked away
+// and there's something worth coming back for" case PushNotification exists
+// for (per ROADMAP.md's "Nightly summary push notification" item), so this
+// always fires once Finalize is reached — it does not fire on the
+// early-return paths above (no candidates researched or nothing kept after
+// Prioritize), since there is nothing worth walking back to check on there.
+async function sendRunCompletionNotification(message) {
+  await agent(
+    `Send a push notification (status: "proactive") with this exact message text, verbatim, no
+markdown formatting: "${message}"
+This reports that a feature-inventor nightly run just finished running unattended overnight.`,
+    { effort: 'low', phase: 'Finalize', label: 'notify-run-complete' }
+  )
+}
+
+// Live per-feature progress (ROADMAP.md's "Live per-feature progress
+// visibility" item): one TaskCreate per queued candidate up front, then
+// TaskUpdate as each is attempted, so TaskList/TaskGet show real-time status
+// instead of just the current phase name. Delegated to agents for the same
+// reason as everything else above — the script body has no direct tool
+// access. Returns a title -> taskId map; a title missing from the map (a
+// failed create-tasks agent call) makes updateFeatureTask a harmless no-op,
+// so a TaskCreate/TaskUpdate hiccup degrades to "no live view" rather than
+// blocking the run.
+async function createFeatureTasks(features) {
+  if (features.length === 0) return {}
+
+  const result = await agent(
+    `Call TaskCreate once for each of these feature-inventor candidate features, so their progress
+is visible in TaskList during this run. Use the feature's title as the subject verbatim, and
+"Implement, verify, and log this nightly-loop candidate feature." as the description. Leave every
+task at its default "pending" status — do not mark any in_progress yet.
+Features, in the priority order they will be attempted: ${JSON.stringify(features.map(f => f.title))}
+Report back the exact taskId TaskCreate returned for every title, in the same order.`,
+    {
+      schema: {
+        type: 'object',
+        properties: {
+          tasks: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { title: { type: 'string' }, taskId: { type: 'string' } },
+              required: ['title', 'taskId'],
+            },
+          },
+        },
+        required: ['tasks'],
+      },
+      effort: 'low',
+      phase: 'Implement',
+      label: 'create-feature-tasks',
+    }
+  )
+
+  const taskIdsByTitle = {}
+  for (const entry of (result && result.tasks) || []) {
+    taskIdsByTitle[entry.title] = entry.taskId
+  }
+  return taskIdsByTitle
+}
+
+async function updateFeatureTask(taskId, status, outcome) {
+  if (!taskId) return // no task exists for this title (create-tasks call failed) -- nothing to update
+  await agent(
+    `Call TaskUpdate on taskId "${taskId}", setting status to "${status}"${
+      outcome ? ` and merging metadata { "outcome": "${outcome}" }` : ''
+    }. Do not change anything else about the task.`,
+    { effort: 'low', phase: 'Implement', label: `task-update:${status}` }
+  )
+}
+
 // ICE (Impact/Confidence/Ease), each 1-10, replaces ad-hoc S/M/L per
 // RESEARCH.md §3. Ranking is computed here in plain code rather than left
 // to agent judgment — arithmetic should be deterministic, not guessed at.
@@ -307,6 +382,8 @@ if (orderedFeatures.length > MAX_ATTEMPTS) {
   log(`${orderedFeatures.length - MAX_ATTEMPTS} lower-priority candidate(s) not attempted this run — carried forward via the roadmap update.`)
 }
 
+const featureTaskIds = await createFeatureTasks(queue)
+
 // Tracks how far into `queue` the loop actually got, so "candidates not
 // attempted" can be computed accurately below. Previously this was derived
 // solely from `orderedFeatures.slice(queue.length)`, which only accounts for
@@ -334,6 +411,7 @@ for (const feature of queue) {
 
   attemptedCount++
   const iceScore = computeIceScore(feature)
+  await updateFeatureTask(featureTaskIds[feature.title], 'in_progress')
 
   const result = await agent(
     `Implement exactly one feature in the feature-inventor repo at ${REPO_ROOT}, on git branch
@@ -371,6 +449,7 @@ Rules (see VISION.md operating principles):
     log(`No result for "${feature.title}" (agent error) — treating as abandoned.`)
     const reason = 'agent error / no result'
     abandoned.push({ feature, reason })
+    await updateFeatureTask(featureTaskIds[feature.title], 'completed', 'agent-error')
     await appendFeatureLogEntry({
       title: feature.title,
       ice: { impact: feature.impact, confidence: feature.confidence, ease: feature.ease, composite: iceScore },
@@ -383,6 +462,7 @@ Rules (see VISION.md operating principles):
   if (result.status !== 'shipped') {
     log(`Abandoned: ${feature.title} — ${result.reason || 'no reason given'}`)
     abandoned.push({ feature, reason: result.reason })
+    await updateFeatureTask(featureTaskIds[feature.title], 'completed', 'abandoned')
     await appendFeatureLogEntry({
       title: feature.title,
       ice: { impact: feature.impact, confidence: feature.confidence, ease: feature.ease, composite: iceScore },
@@ -426,6 +506,7 @@ Do not push to any remote.`,
   if (verification && verification.verified) {
     log(`Shipped (verified): ${feature.title} (${result.commitSha})${verification.concerns ? ` — noted: ${verification.concerns}` : ''}`)
     shipped.push({ feature, result, verification })
+    await updateFeatureTask(featureTaskIds[feature.title], 'completed', 'shipped')
     await appendFeatureLogEntry({
       title: feature.title,
       ice: { impact: feature.impact, confidence: feature.confidence, ease: feature.ease, composite: iceScore },
@@ -440,6 +521,7 @@ Do not push to any remote.`,
       : 'verification agent error — treating as unverified, not trusting the shipped claim'
     log(`Reverted after failed verification: ${feature.title} — ${reason}`)
     abandoned.push({ feature, reason })
+    await updateFeatureTask(featureTaskIds[feature.title], 'completed', verification ? 'reverted' : 'abandoned')
     // "reverted" (not "abandoned") when a verification agent actually ran and
     // rejected a shipped claim, since that commit did land before being
     // reverted — distinct from a candidate abandoned pre-commit. Keeping the
@@ -498,6 +580,8 @@ Do not push to any remote.`,
 
 await clearStopFlagIfPresent()
 
-log(`Run complete: ${shipped.length} shipped, ${abandoned.length} abandoned, ${notAttempted.length} not attempted.${stopReason ? ` (stopped: ${stopReason})` : ''}`)
+const runSummary = `Run complete: ${shipped.length} shipped, ${abandoned.length} abandoned, ${notAttempted.length} not attempted.${stopReason ? ` (stopped: ${stopReason})` : ''}`
+log(runSummary)
+await sendRunCompletionNotification(`feature-inventor nightly: ${runSummary}`)
 
 return { shipped, abandoned, reevaluation, stoppedEarly, stopReason, notAttempted: notAttempted.map(f => f.title) }
