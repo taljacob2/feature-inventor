@@ -130,17 +130,21 @@ missing, instead of a clean error + non-zero exit.
 
 ## New roadmap items this research produced
 
-Added to `ROADMAP.md` rather than implemented here — these are exactly the
-kind of quick-win, well-scoped items the nightly loop should be picking up
-itself, not something to hand-implement during planning:
-- Switch effort/value scoring to ICE (Impact/Confidence/Ease) in the
-  Research/Prioritize schemas, replacing ad-hoc S/M/L.
-- Independent verification pass before trusting a "shipped" claim (mitigates
-  evaluator overconfidence).
+Two of these were applied by hand shortly after this research pass (see
+`ROADMAP.md`'s `[x]` items and their "done, hand-built" notes) rather than
+left for the loop's first run — the rest are still queued:
+- ~~Switch effort/value scoring to ICE (Impact/Confidence/Ease) in the
+  Research/Prioritize schemas, replacing ad-hoc S/M/L.~~ Done —
+  `workflows/nightly.js` now computes ICE scores deterministically in code.
+- ~~Independent verification pass before trusting a "shipped" claim
+  (mitigates evaluator overconfidence).~~ Done — a second agent re-runs
+  tests and inspects the diff before anything counts as shipped, reverting
+  via `git revert` if it doesn't hold up.
 - Calibration log: predicted ICE scores vs. actual outcome, reviewed each
-  Finalize phase.
+  Finalize phase. Still queued — needs at least one real run to be
+  meaningful.
 - Clean error + non-zero exit in `cli.ts` when ROADMAP.md/CHANGELOG.md are
-  missing/malformed, instead of an unhandled stack trace.
+  missing/malformed, instead of an unhandled stack trace. Still queued.
 
 ## Sources
 
