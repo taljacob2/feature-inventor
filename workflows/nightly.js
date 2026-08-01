@@ -306,6 +306,87 @@ const PRIORITIZE_SCHEMA = {
   required: ['keptFeatures'],
 }
 
+// Pairwise "feature collision rate" (ROADMAP.md's "Parallelize independent
+// features" Later item): 0-100, predicted overlap of files/modules touched
+// or shared logic between two kept candidates. This run only uses the data
+// to order the (still strictly sequential) queue — actually running
+// features in parallel via the Workflow tool's isolation:'worktree' option
+// is deliberately NOT built yet, since the item itself says the thresholds
+// for when parallelizing is worth the risk need real calibration data this
+// project doesn't have. Collecting the signal now, the same way the
+// harness-vs-dark-factory autonomy score scaffolds signals before there's
+// enough history to act on them further, is the honest scope for this pass.
+const COLLISION_SCHEMA = {
+  type: 'object',
+  properties: {
+    pairs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          featureA: { type: 'string' },
+          featureB: { type: 'string' },
+          collisionRate: { type: 'integer', minimum: 0, maximum: 100, description: '0 = genuinely unrelated (files/logic do not overlap at all), 100 = near-total overlap' },
+          rationale: { type: 'string' },
+        },
+        required: ['featureA', 'featureB', 'collisionRate'],
+      },
+    },
+  },
+  required: ['pairs'],
+}
+
+function collisionRateBetween(collisionPairs, titleA, titleB) {
+  const found = collisionPairs.find(
+    (p) => (p.featureA === titleA && p.featureB === titleB) || (p.featureA === titleB && p.featureB === titleA)
+  )
+  // An unreported pair (e.g. the collision-estimate agent call failed, or
+  // simply didn't cover every pair) is treated as "no known collision risk"
+  // rather than blocking ordering on missing data.
+  return found ? found.collisionRate : 0
+}
+
+// Orders features by ICE tier first (features within ~0.5 of each other's
+// composite score are treated as equally prioritized, per VISION.md
+// operating principle #1 — this never lets a lower-ICE feature jump ahead of
+// a meaningfully higher-ICE one just because it collides less), then
+// greedily by lowest predicted collision with whichever feature was placed
+// immediately before it. Deterministic, plain code — this project's existing
+// principle is that ranking arithmetic is computed here, not left to agent
+// judgment (see computeIceScore above); the agent's job is only to supply
+// the raw pairwise collision estimates.
+function orderByIceTierThenMinimalCollision(features, collisionPairs) {
+  const tiers = new Map()
+  for (const feature of features) {
+    const tierKey = Math.round(computeIceScore(feature) * 2) / 2 // nearest 0.5
+    if (!tiers.has(tierKey)) tiers.set(tierKey, [])
+    tiers.get(tierKey).push(feature)
+  }
+
+  const ordered = []
+  let previous = null
+  for (const tierKey of [...tiers.keys()].sort((a, b) => b - a)) {
+    const remaining = tiers.get(tierKey)
+    while (remaining.length > 0) {
+      let bestIndex = 0
+      if (previous) {
+        let bestRate = Infinity
+        remaining.forEach((feature, index) => {
+          const rate = collisionRateBetween(collisionPairs, previous.title, feature.title)
+          if (rate < bestRate) {
+            bestRate = rate
+            bestIndex = index
+          }
+        })
+      }
+      const [next] = remaining.splice(bestIndex, 1)
+      ordered.push(next)
+      previous = next
+    }
+  }
+  return ordered
+}
+
 // Retrospective self-assessment, collected on every attempt regardless of
 // outcome — the raw signal the Calibration log and harness-vs-dark-factory
 // ROADMAP.md items depend on. RESEARCH.md §4 found self-reported confidence
@@ -413,8 +494,27 @@ if (!prioritized || prioritized.keptFeatures.length === 0) {
   return { shipped: [], abandoned: [], candidateFeatures: research.candidateFeatures }
 }
 
-const orderedFeatures = [...prioritized.keptFeatures].sort(
-  (a, b) => computeIceScore(b) - computeIceScore(a)
+let collisionPairs = []
+if (prioritized.keptFeatures.length > 1) {
+  const collisionEstimate = await agent(
+    `For feature-inventor (${REPO_ROOT}), estimate a pairwise "feature collision rate" for every
+distinct pair among these already-prioritized candidate features — 0-100, predicted overlap of
+files/modules likely touched or shared logic, based on their titles/descriptions and what you know
+of the codebase at ${REPO_ROOT}. 0 means genuinely unrelated (e.g. a CLI-only change and a
+Workflow-script-only change); 100 means near-total overlap (e.g. both rewrite the same function).
+Candidates: ${JSON.stringify(prioritized.keptFeatures.map(f => ({ title: f.title, description: f.description })), null, 2)}
+This does not change execution order or whether anything runs in parallel this run — it is
+recorded only to inform ordering and a future decision about parallelizing safely.`,
+    { schema: COLLISION_SCHEMA, phase: 'Prioritize', label: 'estimate-collision-rates' }
+  )
+  collisionPairs = (collisionEstimate && collisionEstimate.pairs) || []
+}
+
+const orderedFeatures = orderByIceTierThenMinimalCollision(prioritized.keptFeatures, collisionPairs)
+log(
+  `Ordered ${orderedFeatures.length} candidate(s) by ICE tier, then by lowest predicted collision ` +
+  `within each tier (${collisionPairs.length} pairwise estimate(s) collected). Execution stays ` +
+  'strictly sequential this run — see ROADMAP.md\'s "Parallelize independent features" item.'
 )
 
 phase('Implement')
