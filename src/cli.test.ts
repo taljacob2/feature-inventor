@@ -1,9 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { printStatus } from "./cli.js";
+import { printStatus, runRecap, runStop } from "./cli.js";
 import type { StatusData } from "./cli.js";
+import { STOP_FLAG_FILENAME, parseStopFlag } from "./stop-flag.js";
+import { RECAP_STATE_FILENAME, parseRecapState } from "./recap.js";
 
 describe("printStatus", () => {
   let dir: string;
@@ -173,5 +175,201 @@ describe("printStatus", () => {
     const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
     expect(output).not.toContain("Feature Inventor — status");
     expect(output).not.toContain("Up next");
+  });
+
+  it("shows a pending stop request in text and JSON output", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+    writeFileSync(
+      join(dir, STOP_FLAG_FILENAME),
+      JSON.stringify({ requestedAt: "2026-08-01T12:00:00.000Z" }),
+    );
+
+    printStatus(dir);
+    const textOutput = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(textOutput).toContain("Stop requested at 2026-08-01T12:00:00.000Z");
+
+    logSpy.mockClear();
+    printStatus(dir, { json: true });
+    const parsed = JSON.parse(logSpy.mock.calls[0]![0] as string) as StatusData;
+    expect(parsed.stopRequestedAt).toBe("2026-08-01T12:00:00.000Z");
+  });
+
+  it("omits the stop-request notice when no stop is pending", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+
+    printStatus(dir);
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).not.toContain("Stop requested");
+  });
+});
+
+describe("runStop", () => {
+  let dir: string;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "feature-inventor-cli-stop-test-"));
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it("writes a stop-flag file with a timestamp when none is pending", () => {
+    runStop(dir);
+
+    const flagPath = join(dir, STOP_FLAG_FILENAME);
+    expect(existsSync(flagPath)).toBe(true);
+    const parsed = parseStopFlag(readFileSync(flagPath, "utf8"));
+    expect(parsed).not.toBeNull();
+    expect(typeof parsed?.requestedAt).toBe("string");
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("Stop requested.");
+  });
+
+  it("reports an already-pending request instead of overwriting it", () => {
+    runStop(dir);
+    const flagPath = join(dir, STOP_FLAG_FILENAME);
+    const firstWrite = readFileSync(flagPath, "utf8");
+
+    logSpy.mockClear();
+    runStop(dir);
+
+    expect(readFileSync(flagPath, "utf8")).toBe(firstWrite);
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("already requested");
+  });
+
+  it("cancels a pending request", () => {
+    runStop(dir);
+    logSpy.mockClear();
+
+    runStop(dir, { cancel: true });
+
+    expect(existsSync(join(dir, STOP_FLAG_FILENAME))).toBe(false);
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("cancelled");
+  });
+
+  it("cancelling when nothing is pending says so instead of erroring", () => {
+    runStop(dir, { cancel: true });
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("No stop request was pending.");
+  });
+});
+
+describe("runRecap", () => {
+  let dir: string;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "feature-inventor-cli-recap-test-"));
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  function writeLog(entries: Record<string, unknown>[]) {
+    writeFileSync(join(dir, "feature-log.jsonl"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  }
+
+  it("shows everything and reports nothing to show when there's no feature-log.jsonl", () => {
+    runRecap(dir);
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("Nothing to report");
+  });
+
+  it("defaults to 'all time' on a first-ever recap (no prior state file)", () => {
+    writeLog([
+      {
+        date: "2026-08-01",
+        title: "First feature",
+        ice: { impact: 6, confidence: 8, ease: 9, composite: 7.7 },
+        status: "shipped",
+        commitSha: "abc1234",
+      },
+    ]);
+
+    runRecap(dir);
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("all time");
+    expect(output).toContain("First feature");
+  });
+
+  it("writes a recap-state file recording today's date unless --peek is passed", () => {
+    writeLog([]);
+
+    runRecap(dir);
+    expect(existsSync(join(dir, RECAP_STATE_FILENAME))).toBe(true);
+
+    rmSync(join(dir, RECAP_STATE_FILENAME));
+    runRecap(dir, { peek: true });
+    expect(existsSync(join(dir, RECAP_STATE_FILENAME))).toBe(false);
+  });
+
+  it("honors an explicit --since date over stored state", () => {
+    writeLog([
+      {
+        date: "2026-07-01",
+        title: "Old feature",
+        ice: { impact: 5, confidence: 5, ease: 5, composite: 5 },
+        status: "shipped",
+        commitSha: "aaa1111",
+      },
+      {
+        date: "2026-08-02",
+        title: "New feature",
+        ice: { impact: 5, confidence: 5, ease: 5, composite: 5 },
+        status: "shipped",
+        commitSha: "bbb2222",
+      },
+    ]);
+    writeFileSync(join(dir, RECAP_STATE_FILENAME), JSON.stringify({ lastRecapAt: "2026-01-01" }));
+
+    runRecap(dir, { since: "2026-08-02" });
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("since 2026-08-02");
+    expect(output).toContain("New feature");
+    expect(output).not.toContain("Old feature");
+  });
+
+  it("uses the stored lastRecapAt watermark when no flags are given", () => {
+    writeLog([
+      {
+        date: "2020-01-01",
+        title: "Old feature",
+        ice: { impact: 5, confidence: 5, ease: 5, composite: 5 },
+        status: "shipped",
+        commitSha: "aaa1111",
+      },
+    ]);
+    writeFileSync(join(dir, RECAP_STATE_FILENAME), JSON.stringify({ lastRecapAt: "2020-06-01" }));
+
+    runRecap(dir);
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("since 2020-06-01");
+    expect(output).not.toContain("Old feature");
+
+    const newState = parseRecapState(readFileSync(join(dir, RECAP_STATE_FILENAME), "utf8"));
+    expect(newState?.lastRecapAt).not.toBe("2020-06-01");
   });
 });

@@ -16,25 +16,112 @@ export const meta = {
 // the next, and multiple agents mutating + committing to the same working
 // tree concurrently would race. See VISION.md operating principle #2.
 
-const REPO_ROOT = 'I:/Tal/Code/other/feature-inventor'
-const BRANCH_NAME = 'nightly'
+// Accepted args (all optional):
+//   repoRoot     - explicit absolute path override (see resolveRepoRoot below)
+//   branchName   - defaults to "nightly"
+//   maxFeatures  - defaults to 3
+
+// Resolved at run start rather than hardcoded to one machine's absolute
+// path — this script has no direct filesystem access itself (only the
+// agents it spawns do, see CONTRIBUTING.md), so even "where am I" has to
+// go through an agent() call. args.repoRoot lets a caller (e.g. a future
+// CronCreate schedule, or CI) pin an explicit path instead of relying on
+// the invoking session's working directory; without it, this auto-detects
+// via `git rev-parse --show-toplevel` and verifies package.json actually
+// names this repo, so a wrong-directory invocation fails loudly instead of
+// running git operations against some unrelated repo.
+async function resolveRepoRoot() {
+  if (args && args.repoRoot) return args.repoRoot
+
+  const result = await agent(
+    `Determine the feature-inventor repository's root directory. Run \`git rev-parse --show-toplevel\`
+in the current working directory and report the absolute path it prints (forward slashes, no
+trailing slash). Then confirm this is actually the feature-inventor repo, not some other one: read
+package.json at that path and check its "name" field equals "feature-inventor". If the current
+directory isn't inside a git repo, or that check fails, report success=false with a clear reason in
+"reason" — do not guess a path.`,
+    {
+      schema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          repoRoot: { type: 'string' },
+          reason: { type: 'string' },
+        },
+        required: ['success'],
+      },
+      effort: 'low',
+      label: 'resolve-repo-root',
+    }
+  )
+
+  if (!result || !result.success || !result.repoRoot) {
+    throw new Error(
+      `Could not resolve the feature-inventor repo root (${result && result.reason ? result.reason : 'agent error'}). ` +
+      'Pass it explicitly via args.repoRoot if this run is not invoked with the repo as the working directory.'
+    )
+  }
+  return result.repoRoot
+}
+
+const REPO_ROOT = await resolveRepoRoot()
+const BRANCH_NAME = (args && args.branchName) || 'nightly'
 const MAX_FEATURES_PER_RUN = (args && args.maxFeatures) || 3
 const MAX_ATTEMPTS = MAX_FEATURES_PER_RUN * 3 // allow skipping abandoned candidates without capping throughput
 
 // Durable, cross-run record of every feature attempt (title, ICE score,
 // status, reason, commit sha, verification concerns) — see
 // src/feature-log.ts for the shared schema and parsing logic that
-// `feature-inventor status` reads back. This loop only ever appends: a
-// single JSON object per line, so a partial write never corrupts prior
-// history. Uses a dynamic import (not a static `import`) since this file
-// isn't guaranteed to be loaded as a plain ES module by whatever host is
-// executing this workflow.
+// `feature-inventor status`/`feature-inventor recap` read back. This loop
+// only ever appends: a single JSON object per line, so a partial write never
+// corrupts prior history. Workflow scripts have no direct filesystem access
+// (see the Workflow tool's own documented constraints), so the write is
+// delegated to a small dedicated agent rather than done in-script — a plain
+// `node:fs` call here would throw the first time this workflow genuinely
+// executed unattended, which (per ROADMAP.md) it never has yet.
 const FEATURE_LOG_PATH = `${REPO_ROOT}/feature-log.jsonl`
 
 async function appendFeatureLogEntry(entry) {
-  const { appendFile } = await import('node:fs/promises')
-  const line = JSON.stringify({ date: new Date().toISOString().slice(0, 10), ...entry }) + '\n'
-  await appendFile(FEATURE_LOG_PATH, line, 'utf8')
+  await agent(
+    `Append exactly one JSON Lines record to ${FEATURE_LOG_PATH} (create the file if it doesn't
+exist yet; otherwise append to the end — never overwrite or reorder existing lines).
+The record is this object, with a "date" field added set to today's date as YYYY-MM-DD (run
+\`date +%F\` in Bash if you're unsure of it):
+${JSON.stringify(entry)}
+Write the given fields exactly as provided; only add "date". This file is gitignored — do not
+commit it. Do not run tests or touch anything else. Confirm when done.`,
+    { effort: 'low', phase: 'Implement', label: `log:${entry.title}` }
+  )
+}
+
+// Gitignored local control file (see src/stop-flag.ts) a human can create
+// via `feature-inventor stop` to ask an in-progress run to wrap up instead
+// of starting another feature. Checked between features, not mid-feature —
+// per VISION.md operating principle #2, a feature already being implemented
+// still finishes (or is abandoned/verified) cleanly rather than being cut
+// off half-done.
+const STOP_FLAG_PATH = `${REPO_ROOT}/.feature-inventor-stop`
+
+async function isStopRequested() {
+  const result = await agent(
+    `Check whether the file "${STOP_FLAG_PATH}" exists (e.g. Bash \`test -f "${STOP_FLAG_PATH}"\`).
+Do not create, modify, or delete it.`,
+    {
+      schema: { type: 'object', properties: { exists: { type: 'boolean' } }, required: ['exists'] },
+      effort: 'low',
+      phase: 'Implement',
+      label: 'check-stop-flag',
+    }
+  )
+  return Boolean(result && result.exists)
+}
+
+async function clearStopFlagIfPresent() {
+  await agent(
+    `If the file "${STOP_FLAG_PATH}" exists, delete it — it's a gitignored local control file, not
+committed to git, so deleting it needs no commit. If it doesn't exist, do nothing.`,
+    { effort: 'low', phase: 'Finalize', label: 'clear-stop-flag' }
+  )
 }
 
 // ICE (Impact/Confidence/Ease), each 1-10, replaces ad-hoc S/M/L per
@@ -188,6 +275,7 @@ const orderedFeatures = [...prioritized.keptFeatures].sort(
 phase('Implement')
 const shipped = []
 const abandoned = []
+let stoppedEarly = false
 const queue = orderedFeatures.slice(0, MAX_ATTEMPTS)
 if (orderedFeatures.length > MAX_ATTEMPTS) {
   log(`${orderedFeatures.length - MAX_ATTEMPTS} lower-priority candidate(s) not attempted this run — carried forward via the roadmap update.`)
@@ -196,6 +284,12 @@ if (orderedFeatures.length > MAX_ATTEMPTS) {
 for (const feature of queue) {
   if (shipped.length >= MAX_FEATURES_PER_RUN) {
     log(`Reached ${MAX_FEATURES_PER_RUN} shipped features for this run — stopping.`)
+    break
+  }
+
+  if (await isStopRequested()) {
+    log('Stop requested (via "feature-inventor stop") — wrapping up gracefully instead of starting another feature.')
+    stoppedEarly = true
     break
   }
 
@@ -338,6 +432,8 @@ Do not push to any remote.`,
   { schema: REEVALUATE_SCHEMA, phase: 'Finalize' }
 )
 
-log(`Run complete: ${shipped.length} shipped, ${abandoned.length} abandoned.`)
+await clearStopFlagIfPresent()
 
-return { shipped, abandoned, reevaluation }
+log(`Run complete: ${shipped.length} shipped, ${abandoned.length} abandoned.${stoppedEarly ? ' (stopped early by request)' : ''}`)
+
+return { shipped, abandoned, reevaluation, stoppedEarly }
