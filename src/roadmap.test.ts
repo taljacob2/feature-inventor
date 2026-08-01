@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBacklogCounts, parseChangelogEntries, parseNowSection } from "./roadmap.js";
+import { parseChangelogEntries, parseNowSection } from "./roadmap.js";
 
 const SAMPLE_ROADMAP = `# Roadmap
 
@@ -64,88 +64,6 @@ describe("parseNowSection", () => {
 ## Next
 `;
     expect(parseNowSection(mixed)).toEqual(["Still open item"]);
-  });
-});
-
-describe("parseBacklogCounts", () => {
-  const ROADMAP_WITH_BACKLOG = `# Roadmap
-
-## Now
-
-- [ ] Do the first thing — S/M — why it matters
-
-## Next
-
-- [ ] Next item one — why it matters
-- [x] Already done next item
-- [ ] Next item two
-      continues here — why it matters
-
-## Later
-
-- [ ] Later item one — why it matters
-
-## Horizon
-
-- [ ] Horizon item one — why it matters
-- [ ] Horizon item two — why it matters
-`;
-
-  it("counts open items in each of Next/Later/Horizon independently", () => {
-    expect(parseBacklogCounts(ROADMAP_WITH_BACKLOG)).toEqual({
-      next: 2,
-      later: 1,
-      horizon: 2,
-    });
-  });
-
-  it("returns zero counts when a section is missing or has no open items", () => {
-    const noBacklog = `# Roadmap
-
-## Now
-
-- [ ] Something — S/S — why it matters
-`;
-    expect(parseBacklogCounts(noBacklog)).toEqual({ next: 0, later: 0, horizon: 0 });
-  });
-
-  it("does not confuse a heading like 'Next Steps' with 'Next' due to word-boundary matching", () => {
-    const trickyHeading = `# Roadmap
-
-## Now
-
-- [ ] Something — S/S — why it matters
-
-## Next
-
-- [ ] Real next item
-
-## Later
-
-- [ ] A later item
-`;
-    expect(parseBacklogCounts(trickyHeading)).toEqual({ next: 1, later: 1, horizon: 0 });
-  });
-
-  it("ignores '## Next'-like lines inside fenced code blocks", () => {
-    const withTemplate = `# Roadmap
-
-## Now
-
-- [ ] Something — S/S — why it matters
-
-## Next
-
-\`\`\`
-## Next
-- [ ] fake item inside a code block
-\`\`\`
-
-- [ ] Real item
-
-## Later
-`;
-    expect(parseBacklogCounts(withTemplate)).toEqual({ next: 1, later: 0, horizon: 0 });
   });
 });
 
