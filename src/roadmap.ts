@@ -63,7 +63,16 @@ export function parseBacklogCounts(roadmapMd: string): BacklogCounts {
   };
 }
 
+/**
+ * Requires the heading to start with a YYYY-MM-DD date (CHANGELOG.md's
+ * documented entry format), not just any `## ` line. A bare `## .+` match
+ * would also pick up a future non-entry heading (e.g. `## Notes` or
+ * `## Deprecated`) added outside a fenced block, silently treating it as a
+ * "shipped" entry — the same class of over-eager boundary match that caused
+ * the Next/Next-Steps collision in `parseSection` above, just for a
+ * different file. See ROADMAP.md's "Audit other regex-based parsing" item.
+ */
 export function parseChangelogEntries(changelogMd: string, limit = 5): string[] {
-  const entries = stripFencedCodeBlocks(changelogMd).match(/^## .+$/gm) ?? [];
+  const entries = stripFencedCodeBlocks(changelogMd).match(/^## \d{4}-\d{2}-\d{2}\b.*$/gm) ?? [];
   return entries.slice(0, limit).map((line) => line.replace(/^## /, "").trim());
 }

@@ -139,4 +139,21 @@ No entries yet.
 `;
     expect(parseChangelogEntries(withTemplate)).toEqual([]);
   });
+
+  it("ignores a non-entry '## ' heading that isn't date-prefixed", () => {
+    // A future "## Notes" or "## Deprecated" section (outside a fenced
+    // block) must not be mistaken for a shipped entry — the same class of
+    // over-eager heading match as the Next/Next-Steps collision, just here
+    // it's "any ## line" instead of a name collision.
+    const withStrayHeading = `# Changelog
+
+## Notes
+
+Some commentary that isn't an entry.
+
+## 2026-08-01 — Real entry
+- Notes here
+`;
+    expect(parseChangelogEntries(withStrayHeading)).toEqual(["2026-08-01 — Real entry"]);
+  });
 });
