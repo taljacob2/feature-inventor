@@ -27,8 +27,10 @@ import {
   DAEMON_LOG_FILENAME,
   appendDaemonLogEntries,
   extractSessionId,
+  filterStaleNightlySessions,
   isRunDue,
   parseIntervalToMs,
+  type ClaudeAgentSummary,
   type DaemonLogEntry,
 } from "./daemon.js";
 
@@ -343,15 +345,6 @@ export interface DaemonOptions {
   once?: boolean;
 }
 
-interface ClaudeAgentSummary {
-  id?: string;
-  cwd?: string;
-  startedAt?: number;
-  status?: string;
-  state?: string;
-  name?: string;
-}
-
 /**
  * Best-effort short status line for the spawned session (name/status/state)
  * via `claude agents --json`. Never throws — a failed or unparseable call
@@ -396,6 +389,50 @@ async function fetchSessionLogs(repoRoot: string, sessionId: string): Promise<st
     return stdout;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Stops leftover background sessions from previous `feature-inventor daemon`
+ * runs against this repo that are stuck/idle rather than actively working —
+ * built directly from a real incident where a prompt bug left several
+ * sessions permanently blocked on an unanswerable confirmation, burning
+ * hours of continuous-churn retries before anyone noticed (see
+ * `CHANGELOG.md` 2026-08-02). Filtering logic (what counts as "stale") is
+ * `filterStaleNightlySessions` in `daemon.ts`, kept pure and tested there;
+ * this function is just the I/O around it (list, filter, stop).
+ */
+export async function cleanStaleSessions(repoRoot: string): Promise<void> {
+  let sessions: ClaudeAgentSummary[];
+  try {
+    const { stdout } = await execFileAsync("claude", ["agents", "--json", "--all"], { cwd: repoRoot });
+    sessions = JSON.parse(stdout) as ClaudeAgentSummary[];
+  } catch (err) {
+    console.error(`Could not list sessions: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const stale = filterStaleNightlySessions(sessions, repoRoot);
+
+  if (stale.length === 0) {
+    console.log("No stale nightly-workflow sessions found for this repo — nothing to clean.");
+    return;
+  }
+
+  console.log(`Found ${stale.length} stale nightly-workflow session(s) for this repo:`);
+  for (const s of stale) {
+    console.log(`  - ${s.id}: status=${s.status ?? "?"} state=${s.state ?? "?"} — ${s.name}`);
+  }
+
+  for (const s of stale) {
+    if (!s.id) continue;
+    try {
+      await execFileAsync("claude", ["stop", s.id], { cwd: repoRoot });
+      console.log(`  stopped ${s.id}`);
+    } catch (err) {
+      console.log(`  failed to stop ${s.id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }
 
@@ -568,10 +605,12 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 
 const USAGE =
   "Usage: feature-inventor [status [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
-  "daemon [--every DURATION] [--yolo] [--max-budget-usd AMOUNT] [--once] | --help | --version]\n" +
+  "daemon [clean | --every DURATION] [--yolo] [--max-budget-usd AMOUNT] [--once] | --help | --version]\n" +
   "  daemon defaults to continuous churn (no --every: the next run starts as soon as the previous " +
   "one finishes). Pass --every DURATION (e.g. 12h, 1d) to slow that down instead. --max-budget-usd " +
-  "is optional and off by default.";
+  "is optional and off by default.\n" +
+  "  daemon clean stops leftover stuck/idle background sessions from previous daemon runs against " +
+  "this repo (never touches actively-busy sessions or unrelated background work).";
 
 /**
  * Prints usage/description and exits 0. Shared by the `--help`/`-h` flags
@@ -617,6 +656,10 @@ async function main(): Promise<void> {
       runStop(process.cwd(), { cancel: rest.includes("--cancel") });
       break;
     case "daemon": {
+      if (rest[0] === "clean") {
+        await cleanStaleSessions(process.cwd());
+        break;
+      }
       const everyIndex = rest.indexOf("--every");
       const pollIndex = rest.indexOf("--poll");
       const timeoutIndex = rest.indexOf("--timeout");

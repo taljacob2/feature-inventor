@@ -2,12 +2,99 @@ import { describe, expect, it } from "vitest";
 import {
   appendDaemonLogEntries,
   extractSessionId,
+  filterStaleNightlySessions,
   isRunDue,
   parseDaemonLogEntries,
   parseIntervalToMs,
   serializeDaemonLogEntry,
+  type ClaudeAgentSummary,
   type DaemonLogEntry,
 } from "./daemon.js";
+
+const REPO_ROOT = "I:/Tal/Code/other/feature-inventor";
+
+describe("filterStaleNightlySessions", () => {
+  it("includes a blocked background session against this repo whose name mentions nightly", () => {
+    const sessions: ClaudeAgentSummary[] = [
+      {
+        id: "abc12345",
+        cwd: REPO_ROOT,
+        kind: "background",
+        name: "Run the feature-inventor nightly workflow: ...",
+        status: "waiting",
+        state: "blocked",
+      },
+    ];
+    expect(filterStaleNightlySessions(sessions, REPO_ROOT)).toEqual(sessions);
+  });
+
+  it("excludes an actively busy/working session even if it matches name and cwd", () => {
+    const sessions: ClaudeAgentSummary[] = [
+      {
+        id: "abc12345",
+        cwd: REPO_ROOT,
+        kind: "background",
+        name: "invoke nightly.js workflow",
+        status: "busy",
+        state: "working",
+      },
+    ];
+    expect(filterStaleNightlySessions(sessions, REPO_ROOT)).toEqual([]);
+  });
+
+  it("excludes an interactive session even if cwd and name would otherwise match", () => {
+    const sessions: ClaudeAgentSummary[] = [
+      { id: "abc12345", cwd: REPO_ROOT, kind: "interactive", name: "nightly workflow chat" },
+    ];
+    expect(filterStaleNightlySessions(sessions, REPO_ROOT)).toEqual([]);
+  });
+
+  it("excludes a background session against this repo whose name doesn't mention nightly (unrelated work)", () => {
+    const sessions: ClaudeAgentSummary[] = [
+      {
+        id: "9b108494",
+        cwd: REPO_ROOT,
+        kind: "background",
+        name: "Plan AI feature inventor system",
+        status: "waiting",
+        state: "blocked",
+      },
+    ];
+    expect(filterStaleNightlySessions(sessions, REPO_ROOT)).toEqual([]);
+  });
+
+  it("excludes a matching session against a different repo", () => {
+    const sessions: ClaudeAgentSummary[] = [
+      {
+        id: "abc12345",
+        cwd: "I:/Tal/Code/other/working-hours-counter",
+        kind: "background",
+        name: "run nightly workflow",
+        status: "idle",
+        state: "blocked",
+      },
+    ];
+    expect(filterStaleNightlySessions(sessions, REPO_ROOT)).toEqual([]);
+  });
+
+  it("normalizes drive-letter case and slash direction when comparing cwd", () => {
+    const sessions: ClaudeAgentSummary[] = [
+      {
+        id: "abc12345",
+        cwd: "i:\\Tal\\Code\\other\\feature-inventor",
+        kind: "background",
+        name: "run nightly workflow",
+        status: "idle",
+        state: "blocked",
+      },
+    ];
+    expect(filterStaleNightlySessions(sessions, REPO_ROOT)).toHaveLength(1);
+  });
+
+  it("returns an empty array for an empty session list", () => {
+    expect(filterStaleNightlySessions([], REPO_ROOT)).toEqual([]);
+  });
+});
 
 describe("extractSessionId", () => {
   it("extracts the id from the observed 'backgrounded · <id>' format", () => {

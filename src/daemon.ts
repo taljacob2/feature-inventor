@@ -8,6 +8,51 @@
 // process's own exit, or claude agents' JSON output — is the authoritative
 // signal that a cycle actually finished.
 
+export interface ClaudeAgentSummary {
+  id?: string;
+  cwd?: string;
+  kind?: string;
+  startedAt?: number;
+  status?: string;
+  state?: string;
+  name?: string;
+}
+
+/** Normalizes a path for comparison across drive-letter case and slash direction (Windows). */
+function normalizePathForCompare(path: string): string {
+  return path.replace(/\\/g, "/").toLowerCase();
+}
+
+/**
+ * Filters a `claude agents --json --all` listing down to background
+ * sessions that look like leftover, stuck/idle `feature-inventor daemon`
+ * runs against the given repo — deliberately conservative (see
+ * `CHANGELOG.md` 2026-08-02 for the real incident this was built from):
+ * - Only `kind === "background"` sessions whose `cwd` matches this repo —
+ *   never interactive sessions.
+ * - Only sessions whose `name` mentions "nightly" — a background session
+ *   against this repo that isn't daemon-related (some other task
+ *   dispatched by hand) is left alone rather than assumed to be ours.
+ * - Never a session that's actively `status: "busy"`/`state: "working"` —
+ *   an in-progress real run is never included, even if it also matches
+ *   the name/cwd filters above.
+ */
+export function filterStaleNightlySessions(
+  sessions: ClaudeAgentSummary[],
+  repoRoot: string,
+): ClaudeAgentSummary[] {
+  const normalizedRepoRoot = normalizePathForCompare(repoRoot);
+  return sessions.filter(
+    (s) =>
+      s.kind === "background" &&
+      s.cwd !== undefined &&
+      normalizePathForCompare(s.cwd) === normalizedRepoRoot &&
+      s.name !== undefined &&
+      /nightly/i.test(s.name) &&
+      !(s.status === "busy" && s.state === "working"),
+  );
+}
+
 /**
  * Extracts the session id from `claude --bg`'s own stdout (observed format:
  * "backgrounded · f845d101" followed by lines like "claude stop f845d101").
