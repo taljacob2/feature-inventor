@@ -31,6 +31,12 @@ import {
 } from "./run-proposal.js";
 import { assertProposalMatchesEnvironment } from "./proposal-execution.js";
 import {
+  getManusTaskSnapshot,
+  journalAlreadyContainsSourceEvent,
+  journalEventFromManusSnapshot,
+  type ManusTaskSnapshot,
+} from "./manus-monitor.js";
+import {
   RUN_JOURNAL_FILENAME,
   appendRunJournalEvents,
   assertLegalRunTransition,
@@ -294,12 +300,17 @@ export async function runPropose(repoRoot: string, options: { json?: boolean } =
   console.log("No agent was started and no repository change was made.");
 }
 
-/** Prints one durable run journal without modifying recap state or the journal itself. */
-export function runJournal(repoRoot: string, args: string[]): void {
+function parseRunIdArgument(command: string, args: string[]): string {
   const runId = args.find((arg) => !arg.startsWith("--"));
   if (!runId || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(runId)) {
-    throw new Error("Usage: feature-inventor journal RUN_ID [--json]");
+    throw new Error(`Usage: feature-inventor ${command} RUN_ID [--json]`);
   }
+  return runId;
+}
+
+/** Prints one durable run journal without modifying recap state or the journal itself. */
+export function runJournal(repoRoot: string, args: string[]): void {
+  const runId = parseRunIdArgument("journal", args);
   const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME));
   if (content === null) throw new Error(`No journal found for ${runId}`);
   const events = parseRunJournalEvents(content);
@@ -311,6 +322,59 @@ export function runJournal(repoRoot: string, args: string[]): void {
   console.log(`Run journal: ${runId}`);
   console.log(`Status: ${summary.status}; ${summary.eventCount} event(s)`);
   for (const event of events) console.log(`  ${event.timestamp} ${event.type}`);
+}
+
+function taskIdFromJournal(events: ReturnType<typeof parseRunJournalEvents>): string | null {
+  for (const event of [...events].reverse()) {
+    const taskId = event.payload.taskId;
+    if (typeof taskId === "string" && taskId.trim() !== "") return taskId;
+  }
+  return null;
+}
+
+function formatManusSnapshot(snapshot: ManusTaskSnapshot): string {
+  const lines = [`Manus task: ${snapshot.taskId}`, `Status: ${snapshot.status}`];
+  if (snapshot.brief) lines.push(`Brief: ${snapshot.brief}`);
+  if (snapshot.description) lines.push(`Detail: ${snapshot.description}`);
+  if (snapshot.status === "waiting") {
+    lines.push(`Waiting for: ${snapshot.waitingForEventType ?? "operator input"}`);
+    if (snapshot.waitingDescription) lines.push(`Waiting detail: ${snapshot.waitingDescription}`);
+    lines.push("No action was confirmed. Resolve the request in the task interface, then run watch again.");
+  }
+  if (snapshot.error) lines.push(`Error: ${snapshot.error}`);
+  return lines.join("\n");
+}
+
+/**
+ * Polls one recorded task and appends at most one new journal event. The
+ * recovery form intentionally has the same passive behavior: it is safe after
+ * a CLI crash because duplicate source events are not written twice.
+ */
+export async function runWatch(repoRoot: string, args: string[], mode: "watch" | "recover" = "watch"): Promise<void> {
+  const runId = parseRunIdArgument(mode, args);
+  const journalPath = join(repoRoot, RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME);
+  const journalContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME));
+  if (journalContent === null) throw new Error(`No journal found for ${runId}`);
+  const events = parseRunJournalEvents(journalContent);
+  const taskId = taskIdFromJournal(events);
+  if (taskId === null) throw new Error(`Run ${runId} has no recorded Manus task; launch it with \`feature-inventor manus run --run ${runId}\``);
+
+  const snapshot = await getManusTaskSnapshot(process.env.MANUS_API_KEY ?? "", taskId);
+  const candidate = journalEventFromManusSnapshot(runId, snapshot);
+  let appended = false;
+  if (candidate !== null && !journalAlreadyContainsSourceEvent(events, snapshot.sourceEventId)) {
+    assertLegalRunTransition(events, candidate);
+    writeFileSync(journalPath, appendRunJournalEvents(journalContent, [candidate]), "utf8");
+    appended = true;
+  }
+
+  const data = { runId, mode, snapshot, journalEventAppended: appended };
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  console.log(formatManusSnapshot(snapshot));
+  console.log(appended ? `Recorded ${candidate?.type} in ${journalPath}` : "No new journal event was recorded.");
 }
 
 function optionValue(args: string[], flag: string): string | undefined {
@@ -940,7 +1004,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once [--max-features COUNT] | --every DURATION --timeout DURATION --max-features COUNT] [--yolo] [--max-budget-usd AMOUNT] | --help | --version]\n" +
   "  daemon requires an explicit mode: --once runs one bounded cycle (one feature by default); " +
   "--every DURATION enables repeated execution and requires --timeout plus --max-features. " +
@@ -1030,6 +1094,12 @@ async function main(): Promise<void> {
       break;
     case "journal":
       runJournal(process.cwd(), rest);
+      break;
+    case "watch":
+      await runWatch(process.cwd(), rest, "watch");
+      break;
+    case "recover":
+      await runWatch(process.cwd(), rest, "recover");
       break;
     case "manus":
       await runManus(process.cwd(), rest);

@@ -58,3 +58,13 @@ describe("external task lifecycle", () => {
     expect(() => assertLegalRunTransition([planned, taskCreated], taskCreated)).toThrow("Illegal run transition");
   });
 });
+
+
+it("marks a completed external task as awaiting review until governed evidence is finalized", () => {
+  const events = [
+    createRunJournalEvent(RUN_ID, "planned", at(0)),
+    createRunJournalEvent(RUN_ID, "task-created", at(1), { taskId: "task-1" }),
+    createRunJournalEvent(RUN_ID, "task-completed", at(2), { taskId: "task-1", sourceEventId: "evt-stopped" }),
+  ];
+  expect(summarizeRunJournal(RUN_ID, events)).toMatchObject({ status: "awaiting-review", finalizedAt: null });
+});

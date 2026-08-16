@@ -157,7 +157,7 @@ feature-inventor journal RUN_ID --json
 feature-inventor recap --all --peek
 ```
 
-`status` shows recent governed runs, `journal` shows one run's durable events, and `recap` includes governed-run summaries alongside the legacy feature-attempt recap. The current Manus and Claude Code paths are transitional adapters and do not yet consume proposal artifacts directly; the next runtime-adapter batch will make proposal pinning mandatory at execution time.
+`status` shows recent governed runs, `journal` shows one run's durable events, and `recap` includes governed-run summaries alongside the legacy feature-attempt recap. The Manus adapter consumes a selected proposal and records task creation in the journal. The legacy Claude Code path remains transitional until it is migrated to the same contract.
 
 ### Running a Manus task from a governed proposal
 
@@ -200,10 +200,18 @@ explicit command flag; it never permits a push or merge to `main`/`master`:
 feature-inventor manus run --run RUN_ID --allow-remote-push
 ```
 
-If the task pauses for a confirmation or input, inspect it at the returned task
-URL and decide there. The CLI intentionally does not auto-confirm any pending
-actions. See the [Manus task lifecycle documentation](https://open.manus.ai/docs/v2/task-lifecycle)
-for the possible task states.
+### Watching or recovering a Manus run
+
+```sh
+export MANUS_API_KEY='your-api-key'
+feature-inventor watch RUN_ID
+# After an interrupted local watch command:
+feature-inventor recover RUN_ID
+```
+
+Both commands make one passive task-status request and reconcile at most one new status event into the selected journal. A `running` task is recorded as `task-running`; a task waiting for input or confirmation is recorded as `task-waiting`; a stopped task becomes `task-completed` and is shown as **awaiting review** until evidence is finalized; and an API-reported task error becomes `run-failed`. Re-running `watch` or `recover` is safe because the same external source event is not appended twice.
+
+`watch` and `recover` never send a message, approve a confirmation, provide a secret, push a branch, create a pull request, or merge code. If the task pauses for input or a confirmation, inspect it at the returned task URL and decide there. See the [Manus task lifecycle documentation](https://open.manus.ai/docs/v2/task-lifecycle) for the possible task states.
 
 ### Recap: "while you were sleeping"
 

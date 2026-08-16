@@ -3,6 +3,9 @@ export const RUN_JOURNAL_FILENAME = "events.jsonl";
 export type RunEventType =
   | "planned"
   | "task-created"
+  | "task-running"
+  | "task-waiting"
+  | "task-completed"
   | "workspace-prepared"
   | "candidate-started"
   | "candidate-abandoned"
@@ -23,7 +26,7 @@ export interface RunJournalEvent {
   payload: Record<string, unknown>;
 }
 
-export type RunLifecycleStatus = "planned" | "active" | "finalized" | "failed";
+export type RunLifecycleStatus = "planned" | "active" | "awaiting-review" | "finalized" | "failed";
 
 export interface RunJournalSummary {
   runId: string;
@@ -37,7 +40,10 @@ export interface RunJournalSummary {
 const TRANSITIONS: Record<RunEventType | "none", RunEventType[]> = {
   none: ["planned"],
   planned: ["task-created", "workspace-prepared", "run-failed"],
-  "task-created": ["workspace-prepared", "run-failed"],
+  "task-created": ["task-running", "task-waiting", "task-completed", "workspace-prepared", "run-failed"],
+  "task-running": ["task-waiting", "task-completed", "run-failed"],
+  "task-waiting": ["task-running", "task-completed", "run-failed"],
+  "task-completed": ["review-packet-created", "run-finalized", "run-failed"],
   "workspace-prepared": ["candidate-started", "run-finalized", "run-failed"],
   "candidate-started": ["candidate-abandoned", "implementation-committed", "run-failed"],
   "candidate-abandoned": ["candidate-started", "run-finalized", "run-failed"],
@@ -133,7 +139,15 @@ export function summarizeRunJournal(runId: string, events: RunJournalEvent[]): R
   const latestEvent = relevant.at(-1) ?? null;
   const terminal = latestEvent?.type;
   const status: RunLifecycleStatus =
-    terminal === "run-finalized" ? "finalized" : terminal === "run-failed" ? "failed" : relevant.length === 0 ? "planned" : "active";
+    terminal === "run-finalized"
+      ? "finalized"
+      : terminal === "run-failed"
+        ? "failed"
+        : terminal === "task-completed"
+          ? "awaiting-review"
+          : relevant.length === 0
+            ? "planned"
+            : "active";
 
   return {
     runId,
