@@ -42,7 +42,7 @@ RunRequest
   -> Finalized | Failed
 ```
 
-The proposal and versioned append-only run journal are implemented under `.feature-inventor/runs/<run-id>/`. `status` and `recap` derive governed-run summaries from the journal. The Manus adapter now requires a selected proposal, verifies the local origin and approved default-branch commit, and records `task-created` after the external task is accepted. Task monitoring and terminal lifecycle events remain the next adapter-migration step, so calibration and legacy daemon views are still transitional.
+The proposal and versioned append-only run journal are implemented under `.feature-inventor/runs/<run-id>/`. `status` and `recap` derive governed-run summaries from the journal. The Manus adapter requires a selected proposal, verifies the local origin and approved default-branch commit, and records `task-created` after the external task is accepted. Passive `watch` and `recover` commands record task progress, waiting states, API errors, and task completion idempotently. A stopped task is intentionally **awaiting review**, not finalized: terminal evidence, verification, and review-packet creation remain distinct lifecycle work.
 
 ## Adapter responsibilities
 
@@ -57,8 +57,8 @@ The implementation order is deliberate:
 1. **Complete:** Make bounded execution the default and document the product boundary.
 2. **Complete:** Add a target manifest and `doctor` preflight.
 3. **Foundation complete:** Add commit-pinned proposals and an append-only run journal.
-4. **In progress:** Move policy and lifecycle enforcement into shared core modules; Manus now verifies proposal identity and records task creation.
-5. Convert remaining runtime-specific execution paths into adapters and add task monitoring for terminal lifecycle events.
+4. **In progress:** Move policy and lifecycle enforcement into shared core modules; Manus verifies proposal identity and passively journals task status.
+5. Convert remaining runtime-specific execution paths into adapters and capture evidence for terminal task outcomes.
 6. Add evidence-based, risk-aware verification and review packets.
 7. Enable explicit scheduling only after bounded-run recovery is reliable.
 8. Support a selected external target repository only after the shared engine is proven.
