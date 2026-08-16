@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { printHelp, printStatus, printVersion, runRecap, runStop } from "./cli.js";
+import { getRunPlanData, printHelp, printRunPlan, printStatus, printVersion, runRecap, runStop } from "./cli.js";
 import type { StatusData } from "./cli.js";
 import { STOP_FLAG_FILENAME, parseStopFlag } from "./stop-flag.js";
 import { RECAP_STATE_FILENAME, parseRecapState } from "./recap.js";
@@ -603,5 +603,37 @@ describe("runRecap", () => {
     rmSync(join(dir, RECAP_STATE_FILENAME));
     runRecap(dir, { json: true, peek: true });
     expect(existsSync(join(dir, RECAP_STATE_FILENAME))).toBe(false);
+  });
+});
+
+
+describe("printRunPlan", () => {
+  let dir: string;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "feature-inventor-plan-test-"));
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it("uses a local policy file and never needs a changelog to build a plan", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Planned candidate — ICE 8/7/6\n\n## Next\n\n- [ ] Deferred candidate — ICE 7/7/7\n",
+    );
+    writeFileSync(join(dir, "feature-inventor.config.json"), '{"maxFeatures":2}');
+
+    const data = getRunPlanData(dir);
+    printRunPlan(dir, { json: true });
+
+    expect(data.policy.maxFeatures).toBe(2);
+    expect(data.queue).toHaveLength(1);
+    expect(data.queue[0]?.title).toContain("Planned candidate");
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"status": "planned"'));
   });
 });

@@ -15,6 +15,10 @@ import { parseFeatureLogEntries, type FeatureLogEntry } from "./feature-log.js";
 import { computeCalibrationStats, type CalibrationStats } from "./calibration.js";
 import { computeAutonomyScore } from "./autonomy.js";
 import { RUN_SUMMARY_FILENAME, parseRunSummary, type RunSummary } from "./run-summary.js";
+import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
+import { RUN_CONFIG_FILENAME, parseRunConfig } from "./run-config.js";
+import { buildRunPlan, formatRunPlan, type RunPlanData } from "./run-plan.js";
+import { createManusRunTask, type ManusAgentProfile } from "./manus-runtime.js";
 import { STOP_FLAG_FILENAME, parseStopFlag, serializeStopFlag } from "./stop-flag.js";
 import {
   RECAP_STATE_FILENAME,
@@ -121,6 +125,73 @@ export function getStatusData(repoRoot: string): StatusData {
     stopRequestedAt,
     lastRun,
   };
+}
+
+/**
+ * Returns a read-only portable execution plan. If no configuration file exists,
+ * the conservative default policy is used; this command never creates a file,
+ * worktree, branch, commit, or remote change.
+ */
+export function getRunPlanData(repoRoot: string): RunPlanData {
+  const roadmap = readRequiredFile(repoRoot, "ROADMAP.md");
+  const configContent = readOptionalFile(repoRoot, RUN_CONFIG_FILENAME);
+  const policy = configContent
+    ? parseRunConfig(configContent)
+    : { ...DEFAULT_RUN_POLICY, testCommands: [...DEFAULT_RUN_POLICY.testCommands] };
+  return buildRunPlan(roadmap, policy, { runtime: "manus" });
+}
+
+export function printRunPlan(repoRoot: string, options: { json?: boolean } = {}): void {
+  const data = getRunPlanData(repoRoot);
+  console.log(options.json ? JSON.stringify(data, null, 2) : formatRunPlan(data));
+}
+
+function optionValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value`);
+  return value;
+}
+
+function parseManusAgentProfile(value: string | undefined): ManusAgentProfile | undefined {
+  if (value === undefined) return undefined;
+  if (value === "manus-1.6" || value === "manus-1.6-lite" || value === "manus-1.6-max") return value;
+  throw new Error("--profile must be manus-1.6, manus-1.6-lite, or manus-1.6-max");
+}
+
+/**
+ * Creates a Manus task from the portable plan. The CLI never authorizes a
+ * remote push by default: both feature-inventor.config.json and this command
+ * must explicitly permit it before the submitted task is told it may push a
+ * review branch.
+ */
+export async function runManus(repoRoot: string, args: string[]): Promise<void> {
+  if (args[0] !== "run") throw new Error("Usage: feature-inventor manus run [options]");
+  const apiKey = process.env.MANUS_API_KEY;
+  if (!apiKey) throw new Error("MANUS_API_KEY is required; set it before running `feature-inventor manus run`");
+
+  let repoUrl: string;
+  try {
+    const { stdout } = await execFileAsync("git", ["remote", "get-url", "origin"], { cwd: repoRoot });
+    repoUrl = stdout.trim();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`Could not resolve Git remote origin: ${reason}`);
+  }
+  if (!repoUrl) throw new Error("Git remote origin is empty; Manus needs a cloneable repository URL");
+
+  const task = await createManusRunTask({
+    apiKey,
+    repoUrl,
+    plan: getRunPlanData(repoRoot),
+    allowRemotePush: args.includes("--allow-remote-push"),
+    projectId: optionValue(args, "--project"),
+    githubConnectorId: optionValue(args, "--github-connector"),
+    agentProfile: parseManusAgentProfile(optionValue(args, "--profile")),
+  });
+
+  console.log(`Created Manus run task: ${task.taskTitle}\nTask ID: ${task.taskId}\nTask URL: ${task.taskUrl}`);
 }
 
 export function printStatus(repoRoot: string, options: { json?: boolean } = {}): void {
@@ -604,7 +675,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | plan [--json] | manus run [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --every DURATION] [--yolo] [--max-budget-usd AMOUNT] [--once] | --help | --version]\n" +
   "  daemon defaults to continuous churn (no --every: the next run starts as soon as the previous " +
   "one finishes). Pass --every DURATION (e.g. 12h, 1d) to slow that down instead. --max-budget-usd " +
@@ -640,6 +711,12 @@ async function main(): Promise<void> {
   switch (command ?? "status") {
     case "status":
       printStatus(process.cwd(), { json: rest.includes("--json") });
+      break;
+    case "plan":
+      printRunPlan(process.cwd(), { json: rest.includes("--json") });
+      break;
+    case "manus":
+      await runManus(process.cwd(), rest);
       break;
     case "recap": {
       const sinceIndex = rest.indexOf("--since");
