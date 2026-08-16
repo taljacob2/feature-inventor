@@ -15,6 +15,10 @@ import { parseFeatureLogEntries, type FeatureLogEntry } from "./feature-log.js";
 import { computeCalibrationStats, type CalibrationStats } from "./calibration.js";
 import { computeAutonomyScore } from "./autonomy.js";
 import { RUN_SUMMARY_FILENAME, parseRunSummary, type RunSummary } from "./run-summary.js";
+import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
+import { RUN_CONFIG_FILENAME, parseRunConfig } from "./run-config.js";
+import { buildRunPlan, formatRunPlan, type RunPlanData } from "./run-plan.js";
+import { createManusRunTask, type ManusAgentProfile } from "./manus-runtime.js";
 import { STOP_FLAG_FILENAME, parseStopFlag, serializeStopFlag } from "./stop-flag.js";
 import {
   RECAP_STATE_FILENAME,
@@ -29,8 +33,11 @@ import {
   extractSessionId,
   filterStaleNightlySessions,
   isRunDue,
+  parseDaemonLogEntries,
   parseIntervalToMs,
+  summarizeDaemonHealth,
   type ClaudeAgentSummary,
+  type DaemonHealth,
   type DaemonLogEntry,
 } from "./daemon.js";
 
@@ -79,6 +86,8 @@ export interface StatusData {
   stopRequestedAt: string | null;
   /** Where the most recent run left off, or null if no run has completed yet. */
   lastRun: RunSummary | null;
+  /** Durable daemon cycle outcomes plus derived liveness/staleness. */
+  daemonHealth: DaemonHealth;
 }
 
 /**
@@ -111,6 +120,9 @@ export function getStatusData(repoRoot: string): StatusData {
   const runSummaryContent = readOptionalFile(repoRoot, RUN_SUMMARY_FILENAME);
   const lastRun = runSummaryContent ? parseRunSummary(runSummaryContent) : null;
 
+  const daemonLogContent = readOptionalFile(repoRoot, DAEMON_LOG_FILENAME);
+  const daemonHealth = summarizeDaemonHealth(daemonLogContent ? parseDaemonLogEntries(daemonLogContent) : []);
+
   return {
     nowItems,
     nextPreview,
@@ -120,7 +132,82 @@ export function getStatusData(repoRoot: string): StatusData {
     calibration,
     stopRequestedAt,
     lastRun,
+    daemonHealth,
   };
+}
+
+/**
+ * Returns a read-only portable execution plan. If no configuration file exists,
+ * the conservative default policy is used; this command never creates a file,
+ * worktree, branch, commit, or remote change.
+ */
+export function getRunPlanData(repoRoot: string): RunPlanData {
+  const roadmap = readRequiredFile(repoRoot, "ROADMAP.md");
+  const configContent = readOptionalFile(repoRoot, RUN_CONFIG_FILENAME);
+  const policy = configContent
+    ? parseRunConfig(configContent)
+    : { ...DEFAULT_RUN_POLICY, testCommands: [...DEFAULT_RUN_POLICY.testCommands] };
+  return buildRunPlan(roadmap, policy, { runtime: "manus" });
+}
+
+export function printRunPlan(repoRoot: string, options: { json?: boolean } = {}): void {
+  const data = getRunPlanData(repoRoot);
+  console.log(options.json ? JSON.stringify(data, null, 2) : formatRunPlan(data));
+}
+
+function optionValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value`);
+  return value;
+}
+
+function parseManusAgentProfile(value: string | undefined): ManusAgentProfile | undefined {
+  if (value === undefined) return undefined;
+  if (value === "manus-1.6" || value === "manus-1.6-lite" || value === "manus-1.6-max") return value;
+  throw new Error("--profile must be manus-1.6, manus-1.6-lite, or manus-1.6-max");
+}
+
+/**
+ * Creates a Manus task from the portable plan. The CLI never authorizes a
+ * remote push by default: both feature-inventor.config.json and this command
+ * must explicitly permit it before the submitted task is told it may push a
+ * review branch.
+ */
+export async function runManus(repoRoot: string, args: string[]): Promise<void> {
+  if (args[0] !== "run") throw new Error("Usage: feature-inventor manus run [options]");
+  const apiKey = process.env.MANUS_API_KEY;
+  if (!apiKey) throw new Error("MANUS_API_KEY is required; set it before running `feature-inventor manus run`");
+
+  let repoUrl: string;
+  try {
+    const { stdout } = await execFileAsync("git", ["remote", "get-url", "origin"], { cwd: repoRoot });
+    repoUrl = stdout.trim();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`Could not resolve Git remote origin: ${reason}`);
+  }
+  if (!repoUrl) throw new Error("Git remote origin is empty; Manus needs a cloneable repository URL");
+
+  const task = await createManusRunTask({
+    apiKey,
+    repoUrl,
+    plan: getRunPlanData(repoRoot),
+    allowRemotePush: args.includes("--allow-remote-push"),
+    projectId: optionValue(args, "--project"),
+    githubConnectorId: optionValue(args, "--github-connector"),
+    agentProfile: parseManusAgentProfile(optionValue(args, "--profile")),
+  });
+
+  console.log(`Created Manus run task: ${task.taskTitle}\nTask ID: ${task.taskId}\nTask URL: ${task.taskUrl}`);
+}
+
+function formatDaemonAge(ageMs: number | null): string {
+  if (ageMs === null) return "an unknown amount of time";
+  if (ageMs < 60_000) return "less than a minute";
+  if (ageMs < 3_600_000) return `${Math.floor(ageMs / 60_000)}m`;
+  return `${Math.floor(ageMs / 3_600_000)}h ${Math.floor((ageMs % 3_600_000) / 60_000)}m`;
 }
 
 export function printStatus(repoRoot: string, options: { json?: boolean } = {}): void {
@@ -131,8 +218,17 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
     return;
   }
 
-  const { nowItems, nextPreview, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt, lastRun } =
-    data;
+  const {
+    nowItems,
+    nextPreview,
+    backlogCounts,
+    recentShipped,
+    recentAttempts,
+    calibration,
+    stopRequestedAt,
+    lastRun,
+    daemonHealth,
+  } = data;
 
   console.log("Feature Inventor — status\n");
 
@@ -178,6 +274,31 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
   console.log(
     `\nBacklog: ${backlogCounts.next} in Next, ${backlogCounts.later} in Later, ${backlogCounts.horizon} in Horizon.`,
   );
+
+  console.log("\nDaemon health:");
+  if (daemonHealth.lastCycle === null) {
+    console.log("  NO CYCLE DATA — no daemon cycle has been recorded yet.");
+  } else {
+    const livenessLabel: Record<DaemonHealth["liveness"], string> = {
+      "no-cycle-data": "NO CYCLE DATA",
+      "in-progress": "IN PROGRESS",
+      stale: "STALE",
+      idle: "IDLE",
+    };
+    const latest = daemonHealth.lastCycle;
+    const eventAt = latest.outcome === "running" ? latest.startedAt : latest.finishedAt ?? latest.startedAt;
+    const stalenessNote = latest.outcome === "running" ? `; stale after ${formatDaemonAge(daemonHealth.staleAfterMs)}` : "";
+    console.log(
+      `  ${livenessLabel[daemonHealth.liveness]} — latest cycle ${latest.outcome} at ${eventAt} ` +
+        `(${formatDaemonAge(daemonHealth.lastCycleAgeMs)} ago${stalenessNote}).`,
+    );
+    console.log("  Recent distinct cycles (newest first):");
+    for (const cycle of daemonHealth.recentCycles) {
+      const timestamp = cycle.outcome === "running" ? cycle.startedAt : cycle.finishedAt ?? cycle.startedAt;
+      const detail = cycle.detail ? ` — ${cycle.detail}` : "";
+      console.log(`    - ${cycle.outcome} at ${timestamp}${detail}`);
+    }
+  }
 
   console.log("\nRecently shipped:");
   if (recentShipped.length === 0) {
@@ -458,7 +579,12 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
     return null;
   }
 
+  const timeoutMs = options.timeoutMs ?? DEFAULT_DAEMON_TIMEOUT_MS;
   const startedAt = new Date().toISOString();
+  // Persist the in-progress record before spawning. If the daemon process dies
+  // during a cycle, `status` can surface this record as stale instead of
+  // misleadingly reporting only an older completed run.
+  appendDaemonLog(repoRoot, { startedAt, finishedAt: null, outcome: "running", staleAfterMs: timeoutMs });
   console.log(`[daemon] ${startedAt} — a run is due, starting one.`);
 
   const claudeArgs = ["--bg"];
@@ -492,6 +618,7 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
       finishedAt: new Date().toISOString(),
       outcome: "spawn-error",
       detail: spawnResult.error,
+      staleAfterMs: timeoutMs,
     };
     appendDaemonLog(repoRoot, entry);
     console.log(`[daemon] Failed to spawn claude: ${spawnResult.error}`);
@@ -499,7 +626,6 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
   }
 
   const sessionId = extractSessionId(spawnResult.output);
-  const timeoutMs = options.timeoutMs ?? DEFAULT_DAEMON_TIMEOUT_MS;
   const pollMs = options.pollMs ?? DEFAULT_DAEMON_POLL_MS;
   const deadline = Date.now() + timeoutMs;
   const startedAtMs = Date.parse(startedAt);
@@ -515,7 +641,12 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
     const content = readOptionalFile(repoRoot, RUN_SUMMARY_FILENAME);
     const summary = content ? parseRunSummary(content) : null;
     if (summary && Date.parse(summary.completedAt) >= startedAtMs) {
-      const entry: DaemonLogEntry = { startedAt, finishedAt: new Date().toISOString(), outcome: "completed" };
+      const entry: DaemonLogEntry = {
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        outcome: "completed",
+        staleAfterMs: timeoutMs,
+      };
       appendDaemonLog(repoRoot, entry);
       console.log(
         `[daemon] Run completed: ${summary.shipped.length} shipped, ${summary.abandoned.length} abandoned, ` +
@@ -554,6 +685,7 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
     finishedAt: new Date().toISOString(),
     outcome: "timed-out",
     detail: `no ${RUN_SUMMARY_FILENAME} update within ${timeoutMs}ms`,
+    staleAfterMs: timeoutMs,
   };
   appendDaemonLog(repoRoot, entry);
   console.log(`[daemon] Timed out waiting for the run to complete after ${timeoutMs}ms — will try again next cycle.`);
@@ -604,7 +736,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | plan [--json] | manus run [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --every DURATION] [--yolo] [--max-budget-usd AMOUNT] [--once] | --help | --version]\n" +
   "  daemon defaults to continuous churn (no --every: the next run starts as soon as the previous " +
   "one finishes). Pass --every DURATION (e.g. 12h, 1d) to slow that down instead. --max-budget-usd " +
@@ -640,6 +772,12 @@ async function main(): Promise<void> {
   switch (command ?? "status") {
     case "status":
       printStatus(process.cwd(), { json: rest.includes("--json") });
+      break;
+    case "plan":
+      printRunPlan(process.cwd(), { json: rest.includes("--json") });
+      break;
+    case "manus":
+      await runManus(process.cwd(), rest);
       break;
     case "recap": {
       const sinceIndex = rest.indexOf("--since");

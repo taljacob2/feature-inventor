@@ -88,6 +88,86 @@ feature-inventor status
 
 Add `--json` for machine-readable output (same data, no section headers).
 
+### Portable run planning (runtime-neutral foundation)
+
+```sh
+feature-inventor plan
+# or: feature-inventor plan --json
+```
+
+`plan` is a **read-only** preview of a future portable run. It selects open
+`Now` items (or `Next` when `Now` is clear), extracts existing ICE scores where
+present, applies the conservative portable-run policy, orders candidates
+deterministically, and labels every candidate carried forward by the per-run
+cap. It invokes no agent and makes **no filesystem, worktree, branch, commit,
+or remote change**.
+
+An optional `feature-inventor.config.json` in the repository root controls the
+preview and is designed to become the common policy for every runtime adapter:
+
+```json
+{
+  "maxFeatures": 1,
+  "branchPrefix": "nightly",
+  "requireIsolatedWorktree": true,
+  "requireIndependentVerification": true,
+  "testCommands": ["npm test", "npm run build"],
+  "remotePushPolicy": "forbidden"
+}
+```
+
+All fields are optional. The defaults above apply if the file is absent;
+`remotePushPolicy` accepts only `"forbidden"` (the default) or
+`"explicit-only"`. The Manus adapter below consumes the same contract. The
+`plan` command itself does **not** execute features; it remains a safe preview
+of what the portable executor would be asked to do.
+
+### Running a Manus task (portable executor)
+
+The `manus run` command turns the read-only plan into a private, asynchronous
+Manus task. It uses the Manus task API rather than Claude Code; the resulting
+agent clones the repository into its own workspace, creates an isolated review
+branch, implements at most the configured number of queued candidates, and
+performs a separate verification pass.
+
+```sh
+export MANUS_API_KEY='your-api-key'
+feature-inventor manus run
+```
+
+The command prints a task URL for monitoring. It does not wait for completion,
+auto-answer questions, auto-confirm commands, or silently approve a push. For
+a private GitHub repository, supply the GitHub connector available to the task:
+
+```sh
+feature-inventor manus run --github-connector YOUR_CONNECTOR_ID
+```
+
+You may also associate the task with a Manus project or choose an available
+agent profile:
+
+```sh
+feature-inventor manus run --project YOUR_PROJECT_ID --profile manus-1.6
+```
+
+The default policy is **local commits only**: the task is instructed not to
+push, open a pull request, merge, or alter a remote repository. Allowing a
+review-branch push requires *both* an explicit configuration policy and an
+explicit command flag; it never permits a push or merge to `main`/`master`:
+
+```json
+{ "remotePushPolicy": "explicit-only" }
+```
+
+```sh
+feature-inventor manus run --allow-remote-push
+```
+
+If the task pauses for a confirmation or input, inspect it at the returned task
+URL and decide there. The CLI intentionally does not auto-confirm any pending
+actions. See the [Manus task lifecycle documentation](https://open.manus.ai/docs/v2/task-lifecycle)
+for the possible task states.
+
 ### Recap: "while you were sleeping"
 
 ```sh
