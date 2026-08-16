@@ -139,6 +139,26 @@ All fields are optional. The defaults above apply if the file is absent;
 `plan` command itself does **not** execute features; it remains a safe preview
 of what the portable executor would be asked to do.
 
+### Creating a governed run proposal
+
+After `doctor` passes and you have reviewed the read-only plan, create a durable proposal:
+
+```sh
+feature-inventor propose
+# or: feature-inventor propose --json
+```
+
+`propose` does **not** start an agent. It resolves the configured default branch to a concrete Git commit, stores the full queue and policy with stable hashes, and initializes an append-only journal with a `planned` event. Local artifacts are placed under `.feature-inventor/runs/<run-id>/` and are intentionally ignored by Git.
+
+```sh
+feature-inventor status
+feature-inventor journal RUN_ID
+feature-inventor journal RUN_ID --json
+feature-inventor recap --all --peek
+```
+
+`status` shows recent governed runs, `journal` shows one run's durable events, and `recap` includes governed-run summaries alongside the legacy feature-attempt recap. The current Manus and Claude Code paths are transitional adapters and do not yet consume proposal artifacts directly; the next runtime-adapter batch will make proposal pinning mandatory at execution time.
+
 ### Running a Manus task (portable executor)
 
 The `manus run` command turns the read-only plan into a private, asynchronous
