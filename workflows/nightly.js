@@ -10,6 +10,13 @@ export const meta = {
   ],
 }
 
+// ARCHIVED EXECUTION PATH: this historical Workflow-tool script predates the
+// governed proposal, journal, runtime-result, and review-packet contract. It
+// is retained only for audit and migration reference. New runs must use
+// `feature-inventor propose` followed by `feature-inventor claude run --run RUN_ID`
+// or `feature-inventor manus run --run RUN_ID`. Do not schedule or invoke this
+// file for new production work.
+
 // This loop is intentionally sequential in the Implement phase, not fanned
 // out with pipeline()/parallel(): the brief this system follows requires
 // each feature to be tested (and independently verified) before moving to

@@ -19,6 +19,7 @@ import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
 import { RUN_CONFIG_FILENAME, parseRunConfig } from "./run-config.js";
 import { buildRunPlan, formatRunPlan, type RunPlanData } from "./run-plan.js";
 import { createManusRunTask, type ManusAgentProfile } from "./manus-runtime.js";
+import { runClaudeCodeProposal } from "./claude-runtime.js";
 import { buildDoctorData, formatDoctor } from "./doctor.js";
 import { TARGET_MANIFEST_FILENAME, parseTargetManifest } from "./target-manifest.js";
 import {
@@ -652,6 +653,91 @@ export async function runManus(repoRoot: string, args: string[]): Promise<void> 
   );
 }
 
+
+/**
+ * Launches Claude Code only from one immutable proposal. The adapter uses a
+ * worktree and records concrete lifecycle events; it does not push, open a
+ * pull request, or finalize the run.
+ */
+export async function runClaude(repoRoot: string, args: string[]): Promise<void> {
+  if (args[0] !== "run") throw new Error("Usage: feature-inventor claude run --run RUN_ID [--json]");
+  const runId = optionValue(args, "--run");
+  if (!runId || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(runId)) {
+    throw new Error("claude run requires --run RUN_ID from `feature-inventor propose`");
+  }
+  const proposal = loadProposalForRun(repoRoot, runId);
+  const journalPath = join(repoRoot, RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME);
+  let journalContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME));
+  if (journalContent === null) throw new Error(`No journal found for ${runId}`);
+  let events = parseRunJournalEvents(journalContent);
+  const [repoUrl, baseCommit] = await Promise.all([
+    readGitValue(repoRoot, ["remote", "get-url", "origin"]),
+    readGitValue(repoRoot, ["rev-parse", "--verify", `${proposal.target.defaultBranch}^{commit}`]),
+  ]);
+  if (repoUrl === null || baseCommit === null) throw new Error("Could not resolve the local Git origin and configured default-branch commit");
+  assertProposalMatchesEnvironment(proposal, { repositoryUrl: repoUrl, baseCommit });
+
+  const append = (event: ReturnType<typeof createRunJournalEvent>) => {
+    assertLegalRunTransition(events, event);
+    journalContent = appendRunJournalEvents(journalContent ?? "", [event]);
+    writeFileSync(journalPath, journalContent, "utf8");
+    events = [...events, event];
+  };
+
+  try {
+    const outcome = await runClaudeCodeProposal(
+      { repoRoot, proposal },
+      undefined,
+      {
+        onWorktreePrepared(preparation) {
+          append(createRunJournalEvent(runId, "workspace-prepared", new Date().toISOString(), {
+            runtime: "claude-code",
+            worktreePath: preparation.worktreePath,
+            branchName: preparation.branchName,
+          }));
+          append(createRunJournalEvent(runId, "candidate-started", new Date().toISOString(), {
+            runtime: "claude-code",
+            approvedQueue: proposal.queue.map((item) => item.title),
+          }));
+        },
+      },
+    );
+    if (outcome.runtimeResult === null || outcome.error !== null) {
+      append(createRunJournalEvent(runId, "run-failed", new Date().toISOString(), {
+        runtime: "claude-code",
+        worktreePath: outcome.worktreePath,
+        branchName: outcome.branchName,
+        exitCode: outcome.process.exitCode,
+        error: outcome.error ?? "Claude Code returned no valid runtime result",
+      }));
+      throw new Error(outcome.error ?? "Claude Code returned no valid runtime result");
+    }
+    append(createRunJournalEvent(runId, "task-completed", new Date().toISOString(), {
+      runtime: "claude-code",
+      worktreePath: outcome.worktreePath,
+      branchName: outcome.branchName,
+      runtimeResultPath: join(RUNS_DIRECTORY, runId, RUNTIME_RESULT_FILENAME),
+      checkedOutCommit: outcome.runtimeResult.checkedOutCommit,
+      commitSha: outcome.runtimeResult.commitSha,
+      remotePushed: outcome.runtimeResult.remotePushed,
+    }));
+    const data = { runId, worktreePath: outcome.worktreePath, branchName: outcome.branchName, runtimeResultPath: outcome.runtimeResultPath, runtimeResult: outcome.runtimeResult };
+    console.log(args.includes("--json") ? JSON.stringify(data, null, 2) : `Claude Code completed governed run ${runId}; review ${outcome.runtimeResultPath} before finalizing.`);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    const latest = events.at(-1)?.type;
+    if (latest !== "run-failed" && latest !== "run-finalized") {
+      const failed = createRunJournalEvent(runId, "run-failed", new Date().toISOString(), { runtime: "claude-code", error: reason });
+      try {
+        append(failed);
+      } catch {
+        // Preserve the original adapter failure if the journal was concurrently advanced.
+      }
+    }
+    throw err;
+  }
+}
+
 function formatDaemonAge(ageMs: number | null): string {
   if (ageMs === null) return "an unknown amount of time";
   if (ageMs < 60_000) return "less than a minute";
@@ -1205,7 +1291,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once [--max-features COUNT] | --every DURATION --timeout DURATION --max-features COUNT] [--yolo] [--max-budget-usd AMOUNT] | --help | --version]\n" +
   "  daemon requires an explicit mode: --once runs one bounded cycle (one feature by default); " +
   "--every DURATION enables repeated execution and requires --timeout plus --max-features. " +
@@ -1316,6 +1402,9 @@ async function main(): Promise<void> {
       break;
     case "manus":
       await runManus(process.cwd(), rest);
+      break;
+    case "claude":
+      await runClaude(process.cwd(), rest);
       break;
     case "recap": {
       const sinceIndex = rest.indexOf("--since");

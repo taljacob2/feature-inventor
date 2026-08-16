@@ -48,7 +48,7 @@ The proposal and versioned append-only run journal are implemented under `.featu
 
 An adapter may prepare an isolated workspace, invoke an agent with structured inputs, execute allowed commands, capture artifacts, and report runtime state. An adapter may not broaden policy, infer a different target repository, bypass workspace isolation, or authorize remote effects by itself.
 
-The current Claude Code workflow and Manus task integration are transitional adapters. They must converge on the shared lifecycle, policy, proposal, journal, and review-packet model.
+The Manus task integration and the proposal-backed local Claude Code adapter both consume the shared lifecycle, policy, proposal, journal, runtime-result, and review-packet model. Claude Code creates a dedicated local worktree, invokes without a permission-bypass option, and cannot claim a successful run without a proposal-matching local-only runtime result. The historical `workflows/nightly.js` script is not a supported governed runtime.
 
 ## Remediation sequence
 
@@ -57,8 +57,8 @@ The implementation order is deliberate:
 1. **Complete:** Make bounded execution the default and document the product boundary.
 2. **Complete:** Add a target manifest and `doctor` preflight.
 3. **Foundation complete:** Add commit-pinned proposals and an append-only run journal.
-4. **In progress:** Move policy and lifecycle enforcement into shared core modules; Manus verifies proposal identity, journals task status, captures structured runtime artifacts, and gates finalization on review evidence.
-5. Convert remaining runtime-specific execution paths into adapters that produce the same structured result contract.
+4. **Foundation complete:** Shared proposal, journal, runtime-result, and evidence gates are enforced for Manus and local Claude Code execution.
+5. Convert any remaining runtime-specific paths, including the historical workflow script, into explicit adapters or retire them from supported execution.
 6. Add risk-aware verification policies and richer review packets from captured artifacts.
 7. Enable explicit scheduling only after bounded-run recovery is reliable.
 8. Support a selected external target repository only after the shared engine is proven.

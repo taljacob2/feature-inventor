@@ -157,7 +157,7 @@ feature-inventor journal RUN_ID --json
 feature-inventor recap --all --peek
 ```
 
-`status` shows recent governed runs, `journal` shows one run's durable events, and `recap` includes governed-run summaries alongside the legacy feature-attempt recap. The Manus adapter consumes a selected proposal and records task creation in the journal. The legacy Claude Code path remains transitional until it is migrated to the same contract.
+`status` shows recent governed runs, `journal` shows one run's durable events, and `recap` includes governed-run summaries alongside the legacy feature-attempt recap. Both Manus and Claude Code consume the same selected proposal, append lifecycle evidence to the same journal, and produce the same runtime-result contract. The historical `workflows/nightly.js` script is retained only as an archive of prior behavior; do not use it for new governed runs.
 
 ### Running a Manus task from a governed proposal
 
@@ -199,6 +199,18 @@ explicit command flag; it never permits a push or merge to `main`/`master`:
 ```sh
 feature-inventor manus run --run RUN_ID --allow-remote-push
 ```
+
+### Running Claude Code from a governed proposal
+
+The `claude run` command is the local, proposal-backed Claude Code adapter. It resolves the same approved proposal and base commit as `manus run`, creates a dedicated local worktree and branch, then invokes Claude Code without any permission-bypass flag. It never pushes, opens a pull request, merges code, or finalizes the run.
+
+```sh
+feature-inventor propose
+# Note the emitted run ID, then:
+feature-inventor claude run --run RUN_ID
+```
+
+Claude Code must work only inside `.feature-inventor/worktrees/RUN_ID/`, run every proposal-required check, and write `runtime-result.json` into the selected run directory. The adapter rejects a missing or proposal-mismatched result and rejects any result that reports a remote push or review URL. A successful local adapter run records `workspace-prepared`, `candidate-started`, and `task-completed` events in the same journal used by the Manus path. Continue with `review RUN_ID` and `finalize RUN_ID --confirm` only after inspecting the resulting evidence.
 
 ### Watching or recovering a Manus run
 
