@@ -33,8 +33,11 @@ import {
   extractSessionId,
   filterStaleNightlySessions,
   isRunDue,
+  parseDaemonLogEntries,
   parseIntervalToMs,
+  summarizeDaemonHealth,
   type ClaudeAgentSummary,
+  type DaemonHealth,
   type DaemonLogEntry,
 } from "./daemon.js";
 
@@ -83,6 +86,8 @@ export interface StatusData {
   stopRequestedAt: string | null;
   /** Where the most recent run left off, or null if no run has completed yet. */
   lastRun: RunSummary | null;
+  /** Durable daemon cycle outcomes plus derived liveness/staleness. */
+  daemonHealth: DaemonHealth;
 }
 
 /**
@@ -115,6 +120,9 @@ export function getStatusData(repoRoot: string): StatusData {
   const runSummaryContent = readOptionalFile(repoRoot, RUN_SUMMARY_FILENAME);
   const lastRun = runSummaryContent ? parseRunSummary(runSummaryContent) : null;
 
+  const daemonLogContent = readOptionalFile(repoRoot, DAEMON_LOG_FILENAME);
+  const daemonHealth = summarizeDaemonHealth(daemonLogContent ? parseDaemonLogEntries(daemonLogContent) : []);
+
   return {
     nowItems,
     nextPreview,
@@ -124,6 +132,7 @@ export function getStatusData(repoRoot: string): StatusData {
     calibration,
     stopRequestedAt,
     lastRun,
+    daemonHealth,
   };
 }
 
@@ -194,6 +203,13 @@ export async function runManus(repoRoot: string, args: string[]): Promise<void> 
   console.log(`Created Manus run task: ${task.taskTitle}\nTask ID: ${task.taskId}\nTask URL: ${task.taskUrl}`);
 }
 
+function formatDaemonAge(ageMs: number | null): string {
+  if (ageMs === null) return "an unknown amount of time";
+  if (ageMs < 60_000) return "less than a minute";
+  if (ageMs < 3_600_000) return `${Math.floor(ageMs / 60_000)}m`;
+  return `${Math.floor(ageMs / 3_600_000)}h ${Math.floor((ageMs % 3_600_000) / 60_000)}m`;
+}
+
 export function printStatus(repoRoot: string, options: { json?: boolean } = {}): void {
   const data = getStatusData(repoRoot);
 
@@ -202,8 +218,17 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
     return;
   }
 
-  const { nowItems, nextPreview, backlogCounts, recentShipped, recentAttempts, calibration, stopRequestedAt, lastRun } =
-    data;
+  const {
+    nowItems,
+    nextPreview,
+    backlogCounts,
+    recentShipped,
+    recentAttempts,
+    calibration,
+    stopRequestedAt,
+    lastRun,
+    daemonHealth,
+  } = data;
 
   console.log("Feature Inventor — status\n");
 
@@ -249,6 +274,31 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
   console.log(
     `\nBacklog: ${backlogCounts.next} in Next, ${backlogCounts.later} in Later, ${backlogCounts.horizon} in Horizon.`,
   );
+
+  console.log("\nDaemon health:");
+  if (daemonHealth.lastCycle === null) {
+    console.log("  NO CYCLE DATA — no daemon cycle has been recorded yet.");
+  } else {
+    const livenessLabel: Record<DaemonHealth["liveness"], string> = {
+      "no-cycle-data": "NO CYCLE DATA",
+      "in-progress": "IN PROGRESS",
+      stale: "STALE",
+      idle: "IDLE",
+    };
+    const latest = daemonHealth.lastCycle;
+    const eventAt = latest.outcome === "running" ? latest.startedAt : latest.finishedAt ?? latest.startedAt;
+    const stalenessNote = latest.outcome === "running" ? `; stale after ${formatDaemonAge(daemonHealth.staleAfterMs)}` : "";
+    console.log(
+      `  ${livenessLabel[daemonHealth.liveness]} — latest cycle ${latest.outcome} at ${eventAt} ` +
+        `(${formatDaemonAge(daemonHealth.lastCycleAgeMs)} ago${stalenessNote}).`,
+    );
+    console.log("  Recent distinct cycles (newest first):");
+    for (const cycle of daemonHealth.recentCycles) {
+      const timestamp = cycle.outcome === "running" ? cycle.startedAt : cycle.finishedAt ?? cycle.startedAt;
+      const detail = cycle.detail ? ` — ${cycle.detail}` : "";
+      console.log(`    - ${cycle.outcome} at ${timestamp}${detail}`);
+    }
+  }
 
   console.log("\nRecently shipped:");
   if (recentShipped.length === 0) {
@@ -529,7 +579,12 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
     return null;
   }
 
+  const timeoutMs = options.timeoutMs ?? DEFAULT_DAEMON_TIMEOUT_MS;
   const startedAt = new Date().toISOString();
+  // Persist the in-progress record before spawning. If the daemon process dies
+  // during a cycle, `status` can surface this record as stale instead of
+  // misleadingly reporting only an older completed run.
+  appendDaemonLog(repoRoot, { startedAt, finishedAt: null, outcome: "running", staleAfterMs: timeoutMs });
   console.log(`[daemon] ${startedAt} — a run is due, starting one.`);
 
   const claudeArgs = ["--bg"];
@@ -563,6 +618,7 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
       finishedAt: new Date().toISOString(),
       outcome: "spawn-error",
       detail: spawnResult.error,
+      staleAfterMs: timeoutMs,
     };
     appendDaemonLog(repoRoot, entry);
     console.log(`[daemon] Failed to spawn claude: ${spawnResult.error}`);
@@ -570,7 +626,6 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
   }
 
   const sessionId = extractSessionId(spawnResult.output);
-  const timeoutMs = options.timeoutMs ?? DEFAULT_DAEMON_TIMEOUT_MS;
   const pollMs = options.pollMs ?? DEFAULT_DAEMON_POLL_MS;
   const deadline = Date.now() + timeoutMs;
   const startedAtMs = Date.parse(startedAt);
@@ -586,7 +641,12 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
     const content = readOptionalFile(repoRoot, RUN_SUMMARY_FILENAME);
     const summary = content ? parseRunSummary(content) : null;
     if (summary && Date.parse(summary.completedAt) >= startedAtMs) {
-      const entry: DaemonLogEntry = { startedAt, finishedAt: new Date().toISOString(), outcome: "completed" };
+      const entry: DaemonLogEntry = {
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        outcome: "completed",
+        staleAfterMs: timeoutMs,
+      };
       appendDaemonLog(repoRoot, entry);
       console.log(
         `[daemon] Run completed: ${summary.shipped.length} shipped, ${summary.abandoned.length} abandoned, ` +
@@ -625,6 +685,7 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
     finishedAt: new Date().toISOString(),
     outcome: "timed-out",
     detail: `no ${RUN_SUMMARY_FILENAME} update within ${timeoutMs}ms`,
+    staleAfterMs: timeoutMs,
   };
   appendDaemonLog(repoRoot, entry);
   console.log(`[daemon] Timed out waiting for the run to complete after ${timeoutMs}ms — will try again next cycle.`);

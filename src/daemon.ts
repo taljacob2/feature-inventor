@@ -93,16 +93,36 @@ export function isRunDue(nowMs: number, lastCompletedAtIso: string | null, inter
   return nowMs - lastMs >= intervalMs;
 }
 
-export type DaemonCycleOutcome = "completed" | "timed-out" | "spawn-error";
+export type DaemonCycleOutcome = "running" | "completed" | "timed-out" | "spawn-error";
 
 export interface DaemonLogEntry {
   startedAt: string; // ISO 8601
   finishedAt: string | null; // ISO 8601; null only if serialized before a cycle concluded
   outcome: DaemonCycleOutcome;
   detail?: string;
+  /** Effective timeout for this cycle; used to classify an unclosed running record as stale. */
+  staleAfterMs?: number;
 }
 
 export const DAEMON_LOG_FILENAME = ".feature-inventor-daemon.log.jsonl";
+
+/** A daemon run that has not reached a terminal log record within this window is stale. */
+export const DAEMON_HEALTH_STALE_AFTER_MS = 2 * 60 * 60 * 1000;
+
+export type DaemonLiveness = "no-cycle-data" | "in-progress" | "stale" | "idle";
+
+export interface DaemonHealth {
+  /** Whether the latest persisted cycle proves current activity, has gone stale, or is terminal/absent. */
+  liveness: DaemonLiveness;
+  /** The latest persisted cycle after transient running records are collapsed into their terminal result. */
+  lastCycle: DaemonLogEntry | null;
+  /** At most five latest distinct cycles, newest first, for status text and JSON consumers. */
+  recentCycles: DaemonLogEntry[];
+  /** Age of the latest cycle's start (in-progress) or finish (terminal), if its timestamp is valid. */
+  lastCycleAgeMs: number | null;
+  /** The effective staleness threshold used to classify the latest in-progress cycle. */
+  staleAfterMs: number;
+}
 
 export function serializeDaemonLogEntry(entry: DaemonLogEntry): string {
   return JSON.stringify(entry);
@@ -132,12 +152,49 @@ export function parseDaemonLogEntries(content: string): DaemonLogEntry[] {
   return entries;
 }
 
+/**
+ * Summarizes append-only daemon-cycle records for `status`. Each cycle first
+ * writes a `running` record and later appends a terminal record with the same
+ * `startedAt`; collapse those two records so consumers see one current state
+ * per cycle. A daemon that dies before its terminal record leaves a durable
+ * `running` record that becomes stale after the normal cycle timeout.
+ */
+export function summarizeDaemonHealth(
+  entries: DaemonLogEntry[],
+  nowMs: number = Date.now(),
+  staleAfterMs: number = DAEMON_HEALTH_STALE_AFTER_MS,
+): DaemonHealth {
+  const byStartedAt = new Map<string, DaemonLogEntry>();
+  for (const entry of entries) byStartedAt.set(entry.startedAt, entry);
+
+  const recentCycles = [...byStartedAt.values()].slice(-5).reverse();
+  const lastCycle = recentCycles[0] ?? null;
+  const referenceTimestamp = lastCycle?.outcome === "running" ? lastCycle.startedAt : lastCycle?.finishedAt;
+  const referenceMs = referenceTimestamp ? Date.parse(referenceTimestamp) : Number.NaN;
+  const lastCycleAgeMs = Number.isNaN(referenceMs) ? null : Math.max(0, nowMs - referenceMs);
+  const effectiveStaleAfterMs = lastCycle?.staleAfterMs ?? staleAfterMs;
+
+  let liveness: DaemonLiveness = "no-cycle-data";
+  if (lastCycle) {
+    if (lastCycle.outcome !== "running") {
+      liveness = "idle";
+    } else if (lastCycleAgeMs === null || lastCycleAgeMs > effectiveStaleAfterMs) {
+      liveness = "stale";
+    } else {
+      liveness = "in-progress";
+    }
+  }
+
+  return { liveness, lastCycle, recentCycles, lastCycleAgeMs, staleAfterMs: effectiveStaleAfterMs };
+}
+
 function isDaemonLogEntry(value: unknown): value is DaemonLogEntry {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   if (typeof candidate.startedAt !== "string") return false;
   if (candidate.finishedAt !== null && typeof candidate.finishedAt !== "string") return false;
   if (
+    candidate.outcome !== "running" &&
     candidate.outcome !== "completed" &&
     candidate.outcome !== "timed-out" &&
     candidate.outcome !== "spawn-error"
@@ -145,5 +202,11 @@ function isDaemonLogEntry(value: unknown): value is DaemonLogEntry {
     return false;
   }
   if (candidate.detail !== undefined && typeof candidate.detail !== "string") return false;
+  if (
+    candidate.staleAfterMs !== undefined &&
+    (typeof candidate.staleAfterMs !== "number" || !Number.isFinite(candidate.staleAfterMs) || candidate.staleAfterMs <= 0)
+  ) {
+    return false;
+  }
   return true;
 }

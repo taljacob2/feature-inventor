@@ -7,6 +7,7 @@ import {
   parseDaemonLogEntries,
   parseIntervalToMs,
   serializeDaemonLogEntry,
+  summarizeDaemonHealth,
   type ClaudeAgentSummary,
   type DaemonLogEntry,
 } from "./daemon.js";
@@ -171,6 +172,75 @@ describe("isRunDue", () => {
   });
 });
 
+describe("summarizeDaemonHealth", () => {
+  const now = Date.parse("2026-08-01T12:00:00.000Z");
+
+  it("reports no cycle data when the daemon log is absent or empty", () => {
+    expect(summarizeDaemonHealth([], now)).toEqual({
+      liveness: "no-cycle-data",
+      lastCycle: null,
+      recentCycles: [],
+      lastCycleAgeMs: null,
+      staleAfterMs: 2 * 60 * 60 * 1000,
+    });
+  });
+
+  it("reports a recent running cycle as in-progress", () => {
+    const running: DaemonLogEntry = {
+      startedAt: "2026-08-01T11:55:00.000Z",
+      finishedAt: null,
+      outcome: "running",
+    };
+
+    const health = summarizeDaemonHealth([running], now);
+
+    expect(health.liveness).toBe("in-progress");
+    expect(health.lastCycle).toEqual(running);
+    expect(health.lastCycleAgeMs).toBe(5 * 60_000);
+  });
+
+  it("reports an unclosed running cycle beyond its persisted timeout window as stale", () => {
+    const stale: DaemonLogEntry = {
+      startedAt: "2026-08-01T11:54:59.000Z",
+      finishedAt: null,
+      outcome: "running",
+      staleAfterMs: 5 * 60_000,
+    };
+
+    const health = summarizeDaemonHealth([stale], now);
+
+    expect(health.liveness).toBe("stale");
+    expect(health.lastCycle).toEqual(stale);
+    expect(health.staleAfterMs).toBe(5 * 60_000);
+  });
+
+  it("collapses a running record into its later terminal outcome for the same cycle", () => {
+    const startedAt = "2026-08-01T11:00:00.000Z";
+    const running: DaemonLogEntry = { startedAt, finishedAt: null, outcome: "running" };
+    const completed: DaemonLogEntry = {
+      startedAt,
+      finishedAt: "2026-08-01T11:20:00.000Z",
+      outcome: "completed",
+    };
+
+    const health = summarizeDaemonHealth([running, completed], now);
+
+    expect(health.liveness).toBe("idle");
+    expect(health.recentCycles).toEqual([completed]);
+    expect(health.lastCycleAgeMs).toBe(40 * 60_000);
+  });
+
+  it("marks a running cycle with an invalid timestamp stale rather than implying it is healthy", () => {
+    const health = summarizeDaemonHealth(
+      [{ startedAt: "not-a-date", finishedAt: null, outcome: "running" }],
+      now,
+    );
+
+    expect(health.liveness).toBe("stale");
+    expect(health.lastCycleAgeMs).toBeNull();
+  });
+});
+
 describe("daemon log serialize/append/parse", () => {
   const COMPLETED: DaemonLogEntry = {
     startedAt: "2026-08-01T10:00:00.000Z",
@@ -201,9 +271,12 @@ describe("daemon log serialize/append/parse", () => {
     expect(parseDaemonLogEntries(content)).toEqual([COMPLETED]);
   });
 
-  it("skips an entry with an invalid outcome value", () => {
+  it("accepts a durable running record and skips an invalid outcome value", () => {
+    const running = JSON.stringify({ startedAt: "2026-08-01T10:00:00.000Z", finishedAt: null, outcome: "running" });
     const bad = JSON.stringify({ startedAt: "2026-08-01T10:00:00.000Z", finishedAt: null, outcome: "in-progress" });
-    expect(parseDaemonLogEntries(bad)).toEqual([]);
+    expect(parseDaemonLogEntries(`${running}\n${bad}`)).toEqual([
+      { startedAt: "2026-08-01T10:00:00.000Z", finishedAt: null, outcome: "running" },
+    ]);
   });
 
   it("returns existing content unchanged when there are no new entries", () => {

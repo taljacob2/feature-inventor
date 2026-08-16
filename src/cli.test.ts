@@ -8,6 +8,7 @@ import { STOP_FLAG_FILENAME, parseStopFlag } from "./stop-flag.js";
 import { RECAP_STATE_FILENAME, parseRecapState } from "./recap.js";
 import type { RecapData } from "./recap.js";
 import { RUN_SUMMARY_FILENAME, serializeRunSummary } from "./run-summary.js";
+import { DAEMON_LOG_FILENAME } from "./daemon.js";
 
 describe("printStatus", () => {
   let dir: string;
@@ -177,6 +178,78 @@ describe("printStatus", () => {
     const output = logSpy.mock.calls.map((call) => call[0]).join("\n");
     expect(output).not.toContain("Feature Inventor — status");
     expect(output).not.toContain("Up next");
+  });
+
+  it("shows daemon cycle outcomes and idle liveness in text and JSON output", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+    writeFileSync(
+      join(dir, DAEMON_LOG_FILENAME),
+      [
+        JSON.stringify({
+          startedAt: "2026-08-01T09:00:00.000Z",
+          finishedAt: "2026-08-01T09:20:00.000Z",
+          outcome: "completed",
+        }),
+        JSON.stringify({
+          startedAt: "2026-08-01T10:00:00.000Z",
+          finishedAt: null,
+          outcome: "running",
+        }),
+        JSON.stringify({
+          startedAt: "2026-08-01T10:00:00.000Z",
+          finishedAt: "2026-08-01T12:00:00.000Z",
+          outcome: "timed-out",
+          detail: "no run summary update",
+        }),
+      ].join("\n") + "\n",
+    );
+
+    printStatus(dir);
+    const textOutput = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(textOutput).toContain("\nDaemon health:");
+    expect(textOutput).not.toContain("\\nDaemon health:");
+    expect(textOutput).toContain("IDLE — latest cycle timed-out at 2026-08-01T12:00:00.000Z");
+    expect(textOutput).toContain("Recent distinct cycles (newest first):");
+    expect(textOutput).toContain("timed-out at 2026-08-01T12:00:00.000Z — no run summary update");
+    expect(textOutput).toContain("completed at 2026-08-01T09:20:00.000Z");
+
+    logSpy.mockClear();
+    printStatus(dir, { json: true });
+    const parsed = JSON.parse(logSpy.mock.calls[0]![0] as string) as StatusData;
+    expect(parsed.daemonHealth.liveness).toBe("idle");
+    expect(parsed.daemonHealth.lastCycle).toMatchObject({ outcome: "timed-out", detail: "no run summary update" });
+    expect(parsed.daemonHealth.recentCycles).toHaveLength(2);
+  });
+
+  it("marks an unclosed daemon cycle stale in text and JSON output", () => {
+    writeFileSync(
+      join(dir, "ROADMAP.md"),
+      "# Roadmap\n\n## Now\n\n- [ ] Something — S/S — why\n",
+    );
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\nNo entries yet.\n");
+    writeFileSync(
+      join(dir, DAEMON_LOG_FILENAME),
+      JSON.stringify({
+        startedAt: "2020-01-01T00:00:00.000Z",
+        finishedAt: null,
+        outcome: "running",
+      }) + "\n",
+    );
+
+    printStatus(dir);
+    const textOutput = logSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(textOutput).toContain("STALE — latest cycle running at 2020-01-01T00:00:00.000Z");
+    expect(textOutput).toContain("stale after 2h 0m");
+
+    logSpy.mockClear();
+    printStatus(dir, { json: true });
+    const parsed = JSON.parse(logSpy.mock.calls[0]![0] as string) as StatusData;
+    expect(parsed.daemonHealth.liveness).toBe("stale");
+    expect(parsed.daemonHealth.lastCycle).toMatchObject({ outcome: "running" });
   });
 
   it("shows a pending stop request in text and JSON output", () => {
