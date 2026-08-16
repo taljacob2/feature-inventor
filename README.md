@@ -213,6 +213,27 @@ Both commands make one passive task-status request and reconcile at most one new
 
 `watch` and `recover` never send a message, approve a confirmation, provide a secret, push a branch, create a pull request, or merge code. If the task pauses for input or a confirmation, inspect it at the returned task URL and decide there. See the [Manus task lifecycle documentation](https://open.manus.ai/docs/v2/task-lifecycle) for the possible task states.
 
+### Capturing evidence and finalizing a governed run
+
+A stopped task is **not** a completed governed run. First capture its latest passive outcome, then record evidence for every check named in the immutable proposal. The commands record the operator-provided evidence; they do not execute arbitrary commands or trust an agent’s prose as verification.
+
+```sh
+feature-inventor capture RUN_ID
+feature-inventor verify RUN_ID --check 'npm test' --passed --evidence '157 tests passed'
+feature-inventor verify RUN_ID --check 'npm run build' --passed --evidence 'tsc exited 0'
+feature-inventor review RUN_ID
+```
+
+These artifacts remain in `.feature-inventor/runs/RUN_ID/`: `task-outcome.json` stores the captured external result, `verification.jsonl` stores append-only check evidence, and `review.json` derives readiness from the exact proposal, outcome, and required checks. `status` displays a review packet’s readiness when one exists.
+
+Finalization is a **local lifecycle decision only**. It cannot push, merge, or alter a remote repository, but it still requires an explicit command after the review packet is ready:
+
+```sh
+feature-inventor finalize RUN_ID --confirm
+```
+
+A packet is ready only when the captured task status is `stopped`, every required check has passing recorded evidence, and the packet hashes still match the selected proposal. Failed or missing evidence keeps the run pending or blocked.
+
 ### Recap: "while you were sleeping"
 
 ```sh

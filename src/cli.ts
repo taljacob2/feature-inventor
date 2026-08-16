@@ -37,6 +37,19 @@ import {
   type ManusTaskSnapshot,
 } from "./manus-monitor.js";
 import {
+  REVIEW_PACKET_FILENAME,
+  TASK_OUTCOME_FILENAME,
+  VERIFICATION_EVIDENCE_FILENAME,
+  appendVerificationEvidence,
+  createReviewPacket,
+  createTaskOutcome,
+  parseReviewPacket,
+  parseTaskOutcome,
+  parseVerificationEvidence,
+  serializeReviewPacket,
+  serializeTaskOutcome,
+} from "./review-packet.js";
+import {
   RUN_JOURNAL_FILENAME,
   appendRunJournalEvents,
   assertLegalRunTransition,
@@ -95,6 +108,10 @@ function readOptionalFile(repoRoot: string, filename: string): string | null {
 /** How many Next-section titles to preview when the Now section is empty. */
 const NEXT_PREVIEW_LIMIT = 3;
 
+export interface GovernedRunStatus extends RunJournalSummary {
+  reviewReadiness: "pending" | "blocked" | "ready-to-finalize" | null;
+}
+
 export interface StatusData {
   nowItems: string[];
   /**
@@ -115,11 +132,11 @@ export interface StatusData {
   /** Durable daemon cycle outcomes plus derived liveness/staleness. */
   daemonHealth: DaemonHealth;
   /** Recent proposal and execution state derived from append-only run journals. */
-  governedRuns: RunJournalSummary[];
+  governedRuns: GovernedRunStatus[];
 }
 
 /** Returns the newest journal summaries without mutating run artifacts. */
-export function getGovernedRunSummaries(repoRoot: string): RunJournalSummary[] {
+export function getGovernedRunSummaries(repoRoot: string): GovernedRunStatus[] {
   const runsRoot = join(repoRoot, RUNS_DIRECTORY);
   if (!existsSync(runsRoot)) return [];
   try {
@@ -127,7 +144,16 @@ export function getGovernedRunSummaries(repoRoot: string): RunJournalSummary[] {
       .filter((entry) => entry.isDirectory())
       .map((entry) => {
         const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, entry.name, RUN_JOURNAL_FILENAME));
-        return summarizeRunJournal(entry.name, content ? parseRunJournalEvents(content) : []);
+        const reviewContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, entry.name, REVIEW_PACKET_FILENAME));
+        let reviewReadiness: GovernedRunStatus["reviewReadiness"] = null;
+        if (reviewContent !== null) {
+          try {
+            reviewReadiness = parseReviewPacket(reviewContent).readiness;
+          } catch {
+            reviewReadiness = null;
+          }
+        }
+        return { ...summarizeRunJournal(entry.name, content ? parseRunJournalEvents(content) : []), reviewReadiness };
       })
       .filter((summary) => summary.eventCount > 0)
       .sort((left, right) => (right.startedAt ?? "").localeCompare(left.startedAt ?? ""));
@@ -377,6 +403,134 @@ export async function runWatch(repoRoot: string, args: string[], mode: "watch" |
   console.log(appended ? `Recorded ${candidate?.type} in ${journalPath}` : "No new journal event was recorded.");
 }
 
+function getRunArtifactPaths(repoRoot: string, runId: string) {
+  const runDirectory = join(repoRoot, RUNS_DIRECTORY, runId);
+  return {
+    proposalPath: join(runDirectory, RUN_PROPOSAL_FILENAME),
+    journalPath: join(runDirectory, RUN_JOURNAL_FILENAME),
+    outcomePath: join(runDirectory, TASK_OUTCOME_FILENAME),
+    verificationPath: join(runDirectory, VERIFICATION_EVIDENCE_FILENAME),
+    reviewPath: join(runDirectory, REVIEW_PACKET_FILENAME),
+  };
+}
+
+function loadProposalForRun(repoRoot: string, runId: string) {
+  const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_PROPOSAL_FILENAME));
+  if (content === null) throw new Error(`No proposal found for ${runId}`);
+  const proposal = parseRunProposal(content);
+  if (proposal.runId !== runId) throw new Error(`Proposal run ID ${proposal.runId} does not match requested run ${runId}`);
+  return proposal;
+}
+
+function loadJournalForRun(repoRoot: string, runId: string) {
+  const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME));
+  if (content === null) throw new Error(`No journal found for ${runId}`);
+  return { content, events: parseRunJournalEvents(content) };
+}
+
+/** Captures the latest passive external task outcome into a durable local artifact. */
+export async function runCapture(repoRoot: string, args: string[]): Promise<void> {
+  const runId = parseRunIdArgument("capture", args);
+  const { journalPath, outcomePath } = getRunArtifactPaths(repoRoot, runId);
+  const { content: journalContent, events } = loadJournalForRun(repoRoot, runId);
+  const taskId = taskIdFromJournal(events);
+  if (taskId === null) throw new Error(`Run ${runId} has no recorded Manus task to capture`);
+  const snapshot = await getManusTaskSnapshot(process.env.MANUS_API_KEY ?? "", taskId);
+  const candidate = journalEventFromManusSnapshot(runId, snapshot);
+  let journalEventAppended = false;
+  if (candidate !== null && !journalAlreadyContainsSourceEvent(events, snapshot.sourceEventId)) {
+    assertLegalRunTransition(events, candidate);
+    writeFileSync(journalPath, appendRunJournalEvents(journalContent, [candidate]), "utf8");
+    journalEventAppended = true;
+  }
+  const outcome = createTaskOutcome({
+    runId,
+    taskId,
+    capturedAt: new Date().toISOString(),
+    taskStatus: snapshot.status,
+    statusEventId: snapshot.sourceEventId,
+    observedAt: snapshot.observedAt,
+    brief: snapshot.brief,
+    description: snapshot.description,
+    assistantReport: snapshot.assistantReport,
+    error: snapshot.error,
+  });
+  writeFileSync(outcomePath, serializeTaskOutcome(outcome), "utf8");
+  const data = { runId, outcomePath, outcome, journalEventAppended };
+  console.log(args.includes("--json") ? JSON.stringify(data, null, 2) : `Captured ${snapshot.status} task outcome: ${outcomePath}`);
+}
+
+/** Records operator-supplied evidence for one check already required by the proposal. */
+export function runVerify(repoRoot: string, args: string[]): void {
+  const runId = parseRunIdArgument("verify", args);
+  const proposal = loadProposalForRun(repoRoot, runId);
+  const check = optionValue(args, "--check");
+  const evidence = optionValue(args, "--evidence");
+  const passed = args.includes("--passed");
+  const failed = args.includes("--failed");
+  if (!check || !evidence || passed === failed) {
+    throw new Error("Usage: feature-inventor verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT");
+  }
+  if (!proposal.requiredChecks.includes(check)) throw new Error(`Check is not required by proposal: ${check}`);
+  const verificationPath = join(repoRoot, RUNS_DIRECTORY, runId, VERIFICATION_EVIDENCE_FILENAME);
+  const existing = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, VERIFICATION_EVIDENCE_FILENAME)) ?? "";
+  const item = { check, outcome: passed ? ("passed" as const) : ("failed" as const), recordedAt: new Date().toISOString(), evidence };
+  writeFileSync(verificationPath, appendVerificationEvidence(existing, item), "utf8");
+  console.log(args.includes("--json") ? JSON.stringify({ runId, verificationPath, item }, null, 2) : `Recorded ${item.outcome} evidence for ${check}`);
+}
+
+/** Builds a review packet from captured outcome and append-only verification evidence. */
+export function runReview(repoRoot: string, args: string[]): void {
+  const runId = parseRunIdArgument("review", args);
+  const proposal = loadProposalForRun(repoRoot, runId);
+  const { outcomePath, verificationPath, reviewPath } = getRunArtifactPaths(repoRoot, runId);
+  const outcomeContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, TASK_OUTCOME_FILENAME));
+  const verificationContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, VERIFICATION_EVIDENCE_FILENAME));
+  const taskOutcome = outcomeContent === null ? null : parseTaskOutcome(outcomeContent);
+  if (taskOutcome !== null && taskOutcome.runId !== runId) throw new Error(`Task outcome run ID does not match ${runId}`);
+  const verification = verificationContent === null ? [] : parseVerificationEvidence(verificationContent);
+  const packet = createReviewPacket(proposal, new Date().toISOString(), taskOutcome, verification);
+  writeFileSync(reviewPath, serializeReviewPacket(packet), "utf8");
+  const data = { runId, reviewPath, packet, outcomePath, verificationPath };
+  console.log(args.includes("--json") ? JSON.stringify(data, null, 2) : `Created ${packet.readiness} review packet: ${reviewPath}`);
+}
+
+/** Finalizes only a ready review packet and only after an explicit local confirmation flag. */
+export function runFinalize(repoRoot: string, args: string[]): void {
+  const runId = parseRunIdArgument("finalize", args);
+  if (!args.includes("--confirm")) throw new Error("Finalization is local-only but requires explicit --confirm after reviewing the packet");
+  const { content: journalContent, events } = loadJournalForRun(repoRoot, runId);
+  const reviewContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, REVIEW_PACKET_FILENAME));
+  if (reviewContent === null) throw new Error(`No review packet found for ${runId}; run \`feature-inventor review ${runId}\` first`);
+  const proposal = loadProposalForRun(repoRoot, runId);
+  const packet = parseReviewPacket(reviewContent);
+  if (
+    packet.runId !== runId ||
+    packet.readiness !== "ready-to-finalize" ||
+    packet.proposal.baseCommit !== proposal.target.baseCommit ||
+    packet.proposal.manifestHash !== proposal.manifestHash ||
+    packet.proposal.policyHash !== proposal.policyHash
+  ) {
+    throw new Error("Review packet is not ready for this exact proposal; capture a stopped outcome and passing evidence for every required check");
+  }
+  const reviewEvent = createRunJournalEvent(runId, "review-packet-created", packet.createdAt, {
+    reviewPath: join(RUNS_DIRECTORY, runId, REVIEW_PACKET_FILENAME),
+    readiness: packet.readiness,
+  });
+  const finalizedEvent = createRunJournalEvent(runId, "run-finalized", new Date().toISOString(), {
+    reviewPath: join(RUNS_DIRECTORY, runId, REVIEW_PACKET_FILENAME),
+    verifiedChecks: packet.verification.filter((item) => item.outcome === "passed").map((item) => item.check),
+  });
+  assertLegalRunTransition(events, reviewEvent);
+  assertLegalRunTransition([...events, reviewEvent], finalizedEvent);
+  writeFileSync(journalPathForRun(repoRoot, runId), appendRunJournalEvents(journalContent, [reviewEvent, finalizedEvent]), "utf8");
+  console.log(args.includes("--json") ? JSON.stringify({ runId, status: "finalized", reviewPath: join(RUNS_DIRECTORY, runId, REVIEW_PACKET_FILENAME) }, null, 2) : `Finalized governed run ${runId} from evidence-backed review packet.`);
+}
+
+function journalPathForRun(repoRoot: string, runId: string): string {
+  return join(repoRoot, RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME);
+}
+
 function optionValue(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   if (index === -1) return undefined;
@@ -492,7 +646,8 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
   if (governedRuns.length > 0) {
     console.log("Governed runs:");
     for (const run of governedRuns) {
-      console.log(`  ${run.runId}: ${run.status}, ${run.eventCount} event(s), latest ${run.latestEvent?.type ?? "(none)"}`);
+      const review = run.reviewReadiness ? `, review ${run.reviewReadiness}` : "";
+      console.log(`  ${run.runId}: ${run.status}${review}, ${run.eventCount} event(s), latest ${run.latestEvent?.type ?? "(none)"}`);
     }
     console.log("");
   }
@@ -1004,7 +1159,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once [--max-features COUNT] | --every DURATION --timeout DURATION --max-features COUNT] [--yolo] [--max-budget-usd AMOUNT] | --help | --version]\n" +
   "  daemon requires an explicit mode: --once runs one bounded cycle (one feature by default); " +
   "--every DURATION enables repeated execution and requires --timeout plus --max-features. " +
@@ -1100,6 +1255,18 @@ async function main(): Promise<void> {
       break;
     case "recover":
       await runWatch(process.cwd(), rest, "recover");
+      break;
+    case "capture":
+      await runCapture(process.cwd(), rest);
+      break;
+    case "verify":
+      runVerify(process.cwd(), rest);
+      break;
+    case "review":
+      runReview(process.cwd(), rest);
+      break;
+    case "finalize":
+      runFinalize(process.cwd(), rest);
       break;
     case "manus":
       await runManus(process.cwd(), rest);

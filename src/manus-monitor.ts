@@ -15,6 +15,7 @@ export interface ManusTaskSnapshot {
   waitingForEventType: string | null;
   waitingDescription: string | null;
   error: string | null;
+  assistantReport: string | null;
 }
 
 interface ManusApiFailure {
@@ -29,6 +30,7 @@ interface RawTaskEvent {
   timestamp?: unknown;
   status_update?: unknown;
   error_message?: unknown;
+  assistant_message?: unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -58,6 +60,14 @@ function latestStatusEvent(messages: unknown[]): RawTaskEvent | null {
   return [...statuses].sort((left, right) => Number(left.timestamp ?? 0) - Number(right.timestamp ?? 0)).at(-1) ?? null;
 }
 
+function latestAssistantReport(messages: unknown[]): string | null {
+  const messagesWithReports = messages.filter(
+    (message): message is RawTaskEvent => isRecord(message) && message.type === "assistant_message" && isRecord(message.assistant_message),
+  );
+  const latest = [...messagesWithReports].sort((left, right) => Number(left.timestamp ?? 0) - Number(right.timestamp ?? 0)).at(-1);
+  return latest && isRecord(latest.assistant_message) ? getString(latest.assistant_message.content) : null;
+}
+
 function latestError(messages: unknown[]): string | null {
   const errors = messages.filter(
     (message): message is RawTaskEvent => isRecord(message) && message.type === "error_message" && isRecord(message.error_message),
@@ -81,6 +91,7 @@ export function interpretManusTaskMessages(taskId: string, messages: unknown[], 
       waitingForEventType: null,
       waitingDescription: null,
       error: latestError(messages),
+      assistantReport: latestAssistantReport(messages),
     };
   }
   const update = latest.status_update;
@@ -101,6 +112,7 @@ export function interpretManusTaskMessages(taskId: string, messages: unknown[], 
     waitingForEventType: getString(detail.waiting_for_event_type),
     waitingDescription: getString(detail.waiting_description),
     error: status === "error" ? latestError(messages) ?? getString(update.description) : latestError(messages),
+    assistantReport: latestAssistantReport(messages),
   };
 }
 
@@ -126,6 +138,7 @@ export function journalEventFromManusSnapshot(runId: string, snapshot: ManusTask
     waitingForEventType: snapshot.waitingForEventType,
     waitingDescription: snapshot.waitingDescription,
     error: snapshot.error,
+    assistantReport: snapshot.assistantReport,
   });
 }
 
