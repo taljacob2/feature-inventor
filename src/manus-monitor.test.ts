@@ -77,3 +77,34 @@ describe("Manus task monitor", () => {
     expect(init).toMatchObject({ headers: { "x-manus-api-key": "test-key" } });
   });
 });
+
+
+describe("Manus structured runtime result", () => {
+  it("retains the newest official structured-output result without affecting the passive task status", () => {
+    const snapshot = interpretManusTaskMessages(TASK_ID, [
+      statusEvent("evt-stopped", 3_000, "stopped"),
+      {
+        id: "evt-result",
+        type: "structured_output_result",
+        timestamp: 4_000,
+        structured_output_result: {
+          success: true,
+          value: { runId: RUN_ID, checkedOutCommit: "abcdef1234567" },
+          error: null,
+        },
+      },
+    ]);
+
+    expect(snapshot.status).toBe("stopped");
+    expect(snapshot.structuredOutput).toEqual({
+      sourceEventId: "evt-result",
+      success: true,
+      value: { runId: RUN_ID, checkedOutCommit: "abcdef1234567" },
+      error: null,
+    });
+    expect(journalEventFromManusSnapshot(RUN_ID, snapshot)).toMatchObject({
+      type: "task-completed",
+      payload: { structuredOutputEventId: "evt-result", structuredOutputSuccess: true },
+    });
+  });
+});

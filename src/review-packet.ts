@@ -36,6 +36,7 @@ export interface ReviewPacket {
     requiredChecks: string[];
   };
   taskOutcome: TaskOutcome | null;
+  runtimeResultCaptured: boolean;
   verification: VerificationEvidence[];
   missingChecks: string[];
   failedChecks: string[];
@@ -69,6 +70,7 @@ export function createReviewPacket(
   createdAt: string,
   taskOutcome: TaskOutcome | null,
   verification: VerificationEvidence[],
+  runtimeResultCaptured = false,
 ): ReviewPacket {
   assertDate(createdAt, "createdAt");
   if (taskOutcome !== null && taskOutcome.runId !== proposal.runId) {
@@ -86,7 +88,7 @@ export function createReviewPacket(
   const missingChecks = requiredChecks.filter((check) => !latestByCheck.has(check));
   const failedChecks = requiredChecks.filter((check) => latestByCheck.get(check)?.outcome === "failed");
   const readiness: ReviewPacket["readiness"] =
-    taskOutcome === null || taskOutcome.taskStatus !== "stopped" || missingChecks.length > 0
+    !runtimeResultCaptured || taskOutcome === null || taskOutcome.taskStatus !== "stopped" || missingChecks.length > 0
       ? "pending"
       : failedChecks.length > 0
         ? "blocked"
@@ -102,6 +104,7 @@ export function createReviewPacket(
       requiredChecks,
     },
     taskOutcome,
+    runtimeResultCaptured,
     verification: verification.map((item) => ({ ...item })),
     missingChecks,
     failedChecks,
@@ -193,6 +196,7 @@ export function parseReviewPacket(content: string): ReviewPacket {
     typeof parsed.proposal.manifestHash !== "string" ||
     typeof parsed.proposal.policyHash !== "string" ||
     !Array.isArray(parsed.proposal.requiredChecks) ||
+    typeof parsed.runtimeResultCaptured !== "boolean" ||
     !Array.isArray(parsed.verification) ||
     !Array.isArray(parsed.missingChecks) ||
     !Array.isArray(parsed.failedChecks) ||

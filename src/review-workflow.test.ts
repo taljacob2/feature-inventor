@@ -8,6 +8,7 @@ import { buildRunPlan } from "./run-plan.js";
 import { RUN_PROPOSAL_FILENAME, RUNS_DIRECTORY, createRunProposal, serializeRunProposal } from "./run-proposal.js";
 import { RUN_JOURNAL_FILENAME, appendRunJournalEvents, createRunJournalEvent, parseRunJournalEvents, summarizeRunJournal } from "./run-journal.js";
 import { TASK_OUTCOME_FILENAME, createTaskOutcome, serializeTaskOutcome } from "./review-packet.js";
+import { RUNTIME_RESULT_FILENAME, parseRuntimeResult, serializeRuntimeResult } from "./runtime-result.js";
 import type { TargetManifest } from "./target-manifest.js";
 
 const roots: string[] = [];
@@ -60,6 +61,28 @@ function makeRepo(): string {
       }),
     ),
   );
+  writeFileSync(
+    join(runDirectory, RUNTIME_RESULT_FILENAME),
+    serializeRuntimeResult(
+      parseRuntimeResult({
+        schemaVersion: 1,
+        runId: RUN_ID,
+        approvedBaseCommit: proposal.target.baseCommit,
+        checkedOutCommit: proposal.target.baseCommit,
+        worktreePath: "/tmp/worktree",
+        branchName: "nightly/manus-run-1",
+        candidateTitle: "Safe feature",
+        candidateOutcome: "shipped",
+        candidateSummary: "Implemented and verified",
+        commitSha: "1234567abcdef",
+        verification: [{ command: "npm test", outcome: "passed", summary: "162 tests passed" }],
+        patchSummary: "2 files changed",
+        remotePushed: false,
+        remoteReviewUrl: null,
+        blockers: [],
+      }),
+    ),
+  );
   return root;
 }
 
@@ -73,7 +96,6 @@ describe("evidence-backed finalization", () => {
     const root = makeRepo();
     vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-    runVerify(root, [RUN_ID, "--check", "npm test", "--passed", "--evidence", "157 tests passed"]);
     runReview(root, [RUN_ID]);
     expect(() => runFinalize(root, [RUN_ID, "--confirm"])).toThrow("not ready");
 
