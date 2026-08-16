@@ -45,7 +45,7 @@ const TRANSITIONS: Record<RunEventType | "none", RunEventType[]> = {
   "task-waiting": ["task-running", "task-completed", "run-failed"],
   "task-completed": ["review-packet-created", "run-finalized", "run-failed"],
   "workspace-prepared": ["candidate-started", "run-finalized", "run-failed"],
-  "candidate-started": ["candidate-abandoned", "implementation-committed", "run-failed"],
+  "candidate-started": ["candidate-abandoned", "implementation-committed", "task-completed", "run-failed"],
   "candidate-abandoned": ["candidate-started", "run-finalized", "run-failed"],
   "implementation-committed": ["verification-started", "run-failed"],
   "verification-started": ["verification-passed", "verification-failed", "run-failed"],
