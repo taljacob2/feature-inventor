@@ -2,6 +2,7 @@ export const RUN_JOURNAL_FILENAME = "events.jsonl";
 
 export type RunEventType =
   | "planned"
+  | "task-created"
   | "workspace-prepared"
   | "candidate-started"
   | "candidate-abandoned"
@@ -35,7 +36,8 @@ export interface RunJournalSummary {
 
 const TRANSITIONS: Record<RunEventType | "none", RunEventType[]> = {
   none: ["planned"],
-  planned: ["workspace-prepared", "run-failed"],
+  planned: ["task-created", "workspace-prepared", "run-failed"],
+  "task-created": ["workspace-prepared", "run-failed"],
   "workspace-prepared": ["candidate-started", "run-finalized", "run-failed"],
   "candidate-started": ["candidate-abandoned", "implementation-committed", "run-failed"],
   "candidate-abandoned": ["candidate-started", "run-finalized", "run-failed"],

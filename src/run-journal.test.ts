@@ -48,3 +48,13 @@ describe("run journal", () => {
     expect(summarizeRunJournal(RUN_ID, [planned, failed])).toMatchObject({ status: "failed", finalizedAt: at(1) });
   });
 });
+
+
+describe("external task lifecycle", () => {
+  it("allows one task-created event after planning and rejects a duplicate task launch", () => {
+    const planned = createRunJournalEvent(RUN_ID, "planned", at(0));
+    const taskCreated = createRunJournalEvent(RUN_ID, "task-created", at(1), { taskId: "task-1" });
+    expect(() => assertLegalRunTransition([planned], taskCreated)).not.toThrow();
+    expect(() => assertLegalRunTransition([planned, taskCreated], taskCreated)).toThrow("Illegal run transition");
+  });
+});
