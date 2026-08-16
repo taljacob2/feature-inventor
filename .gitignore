@@ -5,3 +5,4 @@ dist/
 .feature-inventor-last-run.json
 .feature-inventor-daemon.log.jsonl
 feature-log.jsonl
+.feature-inventor/

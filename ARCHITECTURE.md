@@ -22,10 +22,10 @@ Feature Inventor itself is the reference target used to exercise and improve the
 A target repository supplies a `feature-inventor.target.json` manifest. The manifest records its repository identity, operator-owned goals, required checks, protected paths, review policy, and scheduling preference.
 
 ```text
-init -> doctor -> plan -> run -> watch -> review
+init -> doctor -> plan -> propose -> run -> watch -> review
 ```
 
-`init` establishes the manifest. `doctor` validates the environment and policy. `plan` produces a commit-pinned run proposal. `run` executes one governed proposal through a selected runtime adapter. `watch` shows durable run state and required human decisions. `review` renders an evidence-backed review packet.
+`init` will establish the manifest. `doctor` validates the environment and policy. `plan` remains a read-only queue preview. `propose` currently resolves the configured default branch to a commit, saves an immutable proposal, and records the first journal event. `run` will execute one governed proposal through a selected runtime adapter. `watch` will show durable run state and required human decisions. `review` will render an evidence-backed review packet.
 
 ## Shared execution model
 
@@ -42,7 +42,7 @@ RunRequest
   -> Finalized | Failed
 ```
 
-Every state transition is recorded in a versioned, append-only run journal. Status, recap, calibration, daemon health, and future scheduling views are derived from this journal rather than competing operational files.
+The proposal and versioned append-only run journal are now implemented under `.feature-inventor/runs/<run-id>/`. `status` and `recap` derive initial governed-run summaries from the journal. Runtime adapters do not yet emit the remaining lifecycle events, so calibration and legacy daemon views remain transitional until adapter migration is complete.
 
 ## Adapter responsibilities
 
@@ -54,9 +54,9 @@ The current Claude Code workflow and Manus task integration are transitional ada
 
 The implementation order is deliberate:
 
-1. Make bounded execution the default and document the product boundary.
-2. Add a target manifest and `doctor` preflight.
-3. Add commit-pinned proposals and an append-only run journal.
+1. **Complete:** Make bounded execution the default and document the product boundary.
+2. **Complete:** Add a target manifest and `doctor` preflight.
+3. **Foundation complete:** Add commit-pinned proposals and an append-only run journal; migrate adapter event emission next.
 4. Move policy and lifecycle enforcement into shared core modules.
 5. Convert runtime-specific execution paths into adapters.
 6. Add evidence-based, risk-aware verification and review packets.

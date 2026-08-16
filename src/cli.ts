@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile, spawn } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -21,6 +21,15 @@ import { buildRunPlan, formatRunPlan, type RunPlanData } from "./run-plan.js";
 import { createManusRunTask, type ManusAgentProfile } from "./manus-runtime.js";
 import { buildDoctorData, formatDoctor } from "./doctor.js";
 import { TARGET_MANIFEST_FILENAME, parseTargetManifest } from "./target-manifest.js";
+import { RUN_PROPOSAL_FILENAME, RUNS_DIRECTORY, createRunId, createRunProposal, serializeRunProposal } from "./run-proposal.js";
+import {
+  RUN_JOURNAL_FILENAME,
+  appendRunJournalEvents,
+  createRunJournalEvent,
+  parseRunJournalEvents,
+  summarizeRunJournal,
+  type RunJournalSummary,
+} from "./run-journal.js";
 import { STOP_FLAG_FILENAME, parseStopFlag, serializeStopFlag } from "./stop-flag.js";
 import {
   RECAP_STATE_FILENAME,
@@ -90,6 +99,26 @@ export interface StatusData {
   lastRun: RunSummary | null;
   /** Durable daemon cycle outcomes plus derived liveness/staleness. */
   daemonHealth: DaemonHealth;
+  /** Recent proposal and execution state derived from append-only run journals. */
+  governedRuns: RunJournalSummary[];
+}
+
+/** Returns the newest journal summaries without mutating run artifacts. */
+export function getGovernedRunSummaries(repoRoot: string): RunJournalSummary[] {
+  const runsRoot = join(repoRoot, RUNS_DIRECTORY);
+  if (!existsSync(runsRoot)) return [];
+  try {
+    return readdirSync(runsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, entry.name, RUN_JOURNAL_FILENAME));
+        return summarizeRunJournal(entry.name, content ? parseRunJournalEvents(content) : []);
+      })
+      .filter((summary) => summary.eventCount > 0)
+      .sort((left, right) => (right.startedAt ?? "").localeCompare(left.startedAt ?? ""));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -124,6 +153,7 @@ export function getStatusData(repoRoot: string): StatusData {
 
   const daemonLogContent = readOptionalFile(repoRoot, DAEMON_LOG_FILENAME);
   const daemonHealth = summarizeDaemonHealth(daemonLogContent ? parseDaemonLogEntries(daemonLogContent) : []);
+  const governedRuns = getGovernedRunSummaries(repoRoot).slice(0, 5);
 
   return {
     nowItems,
@@ -135,6 +165,7 @@ export function getStatusData(repoRoot: string): StatusData {
     stopRequestedAt,
     lastRun,
     daemonHealth,
+    governedRuns,
   };
 }
 
@@ -199,6 +230,78 @@ export async function runDoctor(repoRoot: string, options: { json?: boolean } = 
   });
   console.log(options.json ? JSON.stringify(data, null, 2) : formatDoctor(data));
   if (!data.ready) process.exitCode = 1;
+}
+
+/** Saves a commit-pinned proposal and its initial journal event without launching an execution runtime. */
+export async function runPropose(repoRoot: string, options: { json?: boolean } = {}): Promise<void> {
+  const manifestContent = readOptionalFile(repoRoot, TARGET_MANIFEST_FILENAME);
+  if (manifestContent === null) throw new Error(`${TARGET_MANIFEST_FILENAME} is required before proposing a run`);
+  const { manifest, warnings } = parseTargetManifest(manifestContent);
+  const baseCommit = await readGitValue(repoRoot, ["rev-parse", "--verify", `${manifest.repository.defaultBranch}^{commit}`]);
+  if (baseCommit === null) {
+    throw new Error(`Could not resolve configured default branch ${manifest.repository.defaultBranch} to a commit`);
+  }
+
+  const createdAt = new Date().toISOString();
+  const runId = createRunId(new Date(createdAt), baseCommit);
+  const runDirectory = join(repoRoot, RUNS_DIRECTORY, runId);
+  if (existsSync(runDirectory)) throw new Error(`Run proposal already exists: ${runId}`);
+
+  const proposal = createRunProposal({
+    runId,
+    createdAt,
+    baseCommit,
+    manifest,
+    plan: getRunPlanData(repoRoot),
+  });
+  const proposalPath = join(runDirectory, RUN_PROPOSAL_FILENAME);
+  const journalPath = join(runDirectory, RUN_JOURNAL_FILENAME);
+  mkdirSync(runDirectory, { recursive: true });
+  writeFileSync(proposalPath, serializeRunProposal(proposal), "utf8");
+  writeFileSync(
+    journalPath,
+    appendRunJournalEvents(
+      "",
+      [
+        createRunJournalEvent(runId, "planned", createdAt, {
+          baseCommit,
+          proposalPath: join(RUNS_DIRECTORY, runId, RUN_PROPOSAL_FILENAME),
+        }),
+      ],
+    ),
+    "utf8",
+  );
+
+  const data = { runId, proposalPath, journalPath, proposal, warnings };
+  if (options.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  console.log(`Created governed run proposal: ${runId}`);
+  console.log(`Base commit: ${baseCommit}`);
+  console.log(`Proposal: ${proposalPath}`);
+  console.log(`Journal: ${journalPath}`);
+  if (warnings.length > 0) console.log(`Manifest warnings: ${warnings.join("; ")}`);
+  console.log("No agent was started and no repository change was made.");
+}
+
+/** Prints one durable run journal without modifying recap state or the journal itself. */
+export function runJournal(repoRoot: string, args: string[]): void {
+  const runId = args.find((arg) => !arg.startsWith("--"));
+  if (!runId || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(runId)) {
+    throw new Error("Usage: feature-inventor journal RUN_ID [--json]");
+  }
+  const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME));
+  if (content === null) throw new Error(`No journal found for ${runId}`);
+  const events = parseRunJournalEvents(content);
+  const summary = summarizeRunJournal(runId, events);
+  if (args.includes("--json")) {
+    console.log(JSON.stringify({ summary, events }, null, 2));
+    return;
+  }
+  console.log(`Run journal: ${runId}`);
+  console.log(`Status: ${summary.status}; ${summary.eventCount} event(s)`);
+  for (const event of events) console.log(`  ${event.timestamp} ${event.type}`);
 }
 
 function optionValue(args: string[], flag: string): string | undefined {
@@ -274,6 +377,7 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
     stopRequestedAt,
     lastRun,
     daemonHealth,
+    governedRuns,
   } = data;
 
   console.log("Feature Inventor — status\n");
@@ -283,6 +387,14 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
       `Stop requested at ${stopRequestedAt} — the nightly loop will wrap up its current feature ` +
         "and stop before starting another. Run `feature-inventor stop --cancel` to undo.\n",
     );
+  }
+
+  if (governedRuns.length > 0) {
+    console.log("Governed runs:");
+    for (const run of governedRuns) {
+      console.log(`  ${run.runId}: ${run.status}, ${run.eventCount} event(s), latest ${run.latestEvent?.type ?? "(none)"}`);
+    }
+    console.log("");
   }
 
   if (lastRun) {
@@ -446,7 +558,20 @@ export function runRecap(
   }
 
   const data = buildRecap(entries, sinceDate);
-  console.log(options.json ? JSON.stringify(data, null, 2) : formatRecap(data));
+  const governedRuns = getGovernedRunSummaries(repoRoot).filter(
+    (run) => sinceDate === null || (run.startedAt !== null && run.startedAt >= sinceDate),
+  );
+  if (options.json) {
+    console.log(JSON.stringify({ ...data, governedRuns }, null, 2));
+  } else {
+    console.log(formatRecap(data));
+    if (governedRuns.length > 0) {
+      console.log("\nGoverned run journal:");
+      for (const run of governedRuns) {
+        console.log(`  ${run.runId}: ${run.status}, ${run.eventCount} event(s), latest ${run.latestEvent?.type ?? "(none)"}`);
+      }
+    }
+  }
 
   if (!options.peek) {
     const today = new Date().toISOString().slice(0, 10);
@@ -779,7 +904,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | manus run [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | manus run [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once [--max-features COUNT] | --every DURATION --timeout DURATION --max-features COUNT] [--yolo] [--max-budget-usd AMOUNT] | --help | --version]\n" +
   "  daemon requires an explicit mode: --once runs one bounded cycle (one feature by default); " +
   "--every DURATION enables repeated execution and requires --timeout plus --max-features. " +
@@ -863,6 +988,12 @@ async function main(): Promise<void> {
       break;
     case "plan":
       printRunPlan(process.cwd(), { json: rest.includes("--json") });
+      break;
+    case "propose":
+      await runPropose(process.cwd(), { json: rest.includes("--json") });
+      break;
+    case "journal":
+      runJournal(process.cwd(), rest);
       break;
     case "manus":
       await runManus(process.cwd(), rest);
