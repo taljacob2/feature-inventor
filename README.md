@@ -159,32 +159,32 @@ feature-inventor recap --all --peek
 
 `status` shows recent governed runs, `journal` shows one run's durable events, and `recap` includes governed-run summaries alongside the legacy feature-attempt recap. The current Manus and Claude Code paths are transitional adapters and do not yet consume proposal artifacts directly; the next runtime-adapter batch will make proposal pinning mandatory at execution time.
 
-### Running a Manus task (portable executor)
+### Running a Manus task from a governed proposal
 
-The `manus run` command turns the read-only plan into a private, asynchronous
-Manus task. It uses the Manus task API rather than Claude Code; the resulting
-agent clones the repository into its own workspace, creates an isolated review
-branch, implements at most the configured number of queued candidates, and
-performs a separate verification pass.
+The `manus run` command executes one selected proposal as a private, asynchronous Manus task. It no longer recomputes the current roadmap queue at launch. The CLI verifies that the local Git origin and configured default-branch commit still match the operator-approved proposal before it creates the task.
 
 ```sh
+feature-inventor propose
+# Note the emitted run ID, then:
 export MANUS_API_KEY='your-api-key'
-feature-inventor manus run
+feature-inventor manus run --run RUN_ID
 ```
+
+The task receives the run ID, proposal and manifest hashes, approved base commit, policy, goals, and fixed candidate queue. It must clone the repository into its own workspace, create the review branch from that exact commit, and stop rather than substitute a newer default branch. Immediately after task creation, the CLI appends the task ID and URL to the selected run journal.
 
 The command prints a task URL for monitoring. It does not wait for completion,
 auto-answer questions, auto-confirm commands, or silently approve a push. For
 a private GitHub repository, supply the GitHub connector available to the task:
 
 ```sh
-feature-inventor manus run --github-connector YOUR_CONNECTOR_ID
+feature-inventor manus run --run RUN_ID --github-connector YOUR_CONNECTOR_ID
 ```
 
 You may also associate the task with a Manus project or choose an available
 agent profile:
 
 ```sh
-feature-inventor manus run --project YOUR_PROJECT_ID --profile manus-1.6
+feature-inventor manus run --run RUN_ID --project YOUR_PROJECT_ID --profile manus-1.6
 ```
 
 The default policy is **local commits only**: the task is instructed not to
@@ -197,7 +197,7 @@ explicit command flag; it never permits a push or merge to `main`/`master`:
 ```
 
 ```sh
-feature-inventor manus run --allow-remote-push
+feature-inventor manus run --run RUN_ID --allow-remote-push
 ```
 
 If the task pauses for a confirmation or input, inspect it at the returned task

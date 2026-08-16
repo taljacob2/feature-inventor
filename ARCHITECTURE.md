@@ -42,7 +42,7 @@ RunRequest
   -> Finalized | Failed
 ```
 
-The proposal and versioned append-only run journal are now implemented under `.feature-inventor/runs/<run-id>/`. `status` and `recap` derive initial governed-run summaries from the journal. Runtime adapters do not yet emit the remaining lifecycle events, so calibration and legacy daemon views remain transitional until adapter migration is complete.
+The proposal and versioned append-only run journal are implemented under `.feature-inventor/runs/<run-id>/`. `status` and `recap` derive governed-run summaries from the journal. The Manus adapter now requires a selected proposal, verifies the local origin and approved default-branch commit, and records `task-created` after the external task is accepted. Task monitoring and terminal lifecycle events remain the next adapter-migration step, so calibration and legacy daemon views are still transitional.
 
 ## Adapter responsibilities
 
@@ -56,9 +56,9 @@ The implementation order is deliberate:
 
 1. **Complete:** Make bounded execution the default and document the product boundary.
 2. **Complete:** Add a target manifest and `doctor` preflight.
-3. **Foundation complete:** Add commit-pinned proposals and an append-only run journal; migrate adapter event emission next.
-4. Move policy and lifecycle enforcement into shared core modules.
-5. Convert runtime-specific execution paths into adapters.
+3. **Foundation complete:** Add commit-pinned proposals and an append-only run journal.
+4. **In progress:** Move policy and lifecycle enforcement into shared core modules; Manus now verifies proposal identity and records task creation.
+5. Convert remaining runtime-specific execution paths into adapters and add task monitoring for terminal lifecycle events.
 6. Add evidence-based, risk-aware verification and review packets.
 7. Enable explicit scheduling only after bounded-run recovery is reliable.
 8. Support a selected external target repository only after the shared engine is proven.

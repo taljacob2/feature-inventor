@@ -1,4 +1,4 @@
-import type { RunPlanData } from "./run-plan.js";
+import type { RunProposal } from "./run-proposal.js";
 
 const MANUS_TASK_CREATE_URL = "https://api.manus.ai/v2/task.create";
 
@@ -6,8 +6,9 @@ export type ManusAgentProfile = "manus-1.6" | "manus-1.6-lite" | "manus-1.6-max"
 
 export interface ManusRunTaskRequest {
   apiKey: string;
+  /** The checked local origin, verified against proposal.target before this adapter is called. */
   repoUrl: string;
-  plan: RunPlanData;
+  proposal: RunProposal;
   /** Required in addition to `remotePushPolicy: explicit-only` before a task may push. */
   allowRemotePush?: boolean;
   projectId?: string;
@@ -58,17 +59,19 @@ function apiFailureMessage(value: unknown, fallback: string): string {
 }
 
 function permitsRemotePush(request: ManusRunTaskRequest): boolean {
-  return request.plan.policy.remotePushPolicy === "explicit-only" && request.allowRemotePush === true;
+  return request.proposal.remotePushPolicy === "explicit-only" && request.allowRemotePush === true;
 }
 
 /**
- * Produces the self-contained operational brief for a Manus task. The task is
- * told to act only in a fresh clone/worktree and may push a review branch only
- * when both the stored policy and the individual invocation allow it.
+ * Produces the self-contained operational brief for one immutable proposal.
+ * The task receives the run ID and approved base commit in addition to the
+ * queue and policy, so it cannot silently substitute the latest default
+ * branch for the operator-reviewed repository state.
  */
 export function buildManusRunPrompt(request: ManusRunTaskRequest): string {
   const remotePushAllowed = permitsRemotePush(request);
-  const queued = request.plan.queue.map((candidate, index) => ({
+  const { proposal } = request;
+  const queued = proposal.queue.map((candidate, index) => ({
     priority: index + 1,
     title: candidate.title,
     description: candidate.description,
@@ -79,32 +82,32 @@ export function buildManusRunPrompt(request: ManusRunTaskRequest): string {
       source: candidate.iceSource,
     },
   }));
+  const branchName = `${proposal.policy.branchPrefix}/manus-${proposal.runId}`;
 
-  return `You are the Manus execution adapter for Feature Inventor. Execute one governed, auditable run.\n\n` +
+  return `You are the Manus execution adapter for Feature Inventor. Execute exactly one governed, auditable proposal.\n\n` +
+    `Run ID: ${proposal.runId}\n` +
     `Repository remote: ${request.repoUrl}\n` +
-    `Runtime policy (authoritative):\n${JSON.stringify(request.plan.policy, null, 2)}\n\n` +
+    `Approved default branch: ${proposal.target.defaultBranch}\n` +
+    `Approved base commit (authoritative): ${proposal.target.baseCommit}\n` +
+    `Proposal policy hash: ${proposal.policyHash}\n` +
+    `Proposal manifest hash: ${proposal.manifestHash}\n` +
+    `Operator goals: ${JSON.stringify(proposal.goals)}\n\n` +
+    `Runtime policy (authoritative):\n${JSON.stringify(proposal.policy, null, 2)}\n\n` +
     `Planned candidate queue (authoritative; do not invent additional feature work):\n${JSON.stringify(queued, null, 2)}\n\n` +
     `Required procedure:\n` +
-    `1. Clone the stated repository into this task's own workspace. Do not operate in any pre-existing checkout. ` +
-    `Confirm the cloned package.json names the repository feature-inventor.\n` +
-    `2. Starting from the clone's default branch, create a dedicated Git worktree and a branch named ` +
-    `"${request.plan.policy.branchPrefix}/manus-<unique-run-id>". Never modify main or master.\n` +
-    `3. Attempt no more than ${request.plan.policy.maxFeatures} queued candidate(s), in the listed order. ` +
-    `If a candidate is too risky or underspecified, abandon it cleanly and state why rather than forcing it.\n` +
-    `4. For each implementation, add or update focused tests and run every required command exactly as listed in the policy. ` +
-    `A candidate may be called shipped only if every command passes.\n` +
-    `5. Independently inspect the final diff and rerun every required command before trusting a shipped claim. ` +
-    `If verification finds a substantive issue, revert the feature commit rather than hiding history.\n` +
-    `6. Commit verified work and update ROADMAP.md/CHANGELOG.md only in the dedicated branch. ` +
-    `Do not use Claude Code, the local feature-inventor daemon, or workflows/nightly.js.\n` +
+    `1. Clone only the stated repository into this task's own workspace. Do not operate in any pre-existing checkout or access any other repository.\n` +
+    `2. Fetch the approved commit and verify \`git rev-parse ${proposal.target.baseCommit}\` resolves to ${proposal.target.baseCommit}. Create a dedicated worktree and branch named \`${branchName}\` from that exact commit. If the commit cannot be resolved or checked out, stop without implementation and report a blocked run. Never substitute the current default branch. Never modify main or master.\n` +
+    `3. Attempt no more than ${proposal.policy.maxFeatures} queued candidate(s), in the listed order. If a candidate is too risky or underspecified, abandon it cleanly and state why rather than forcing it.\n` +
+    `4. For each implementation, add or update focused tests and run every required command exactly as listed in the policy. A candidate may be called shipped only if every command passes.\n` +
+    `5. Independently inspect the final diff and rerun every required command before trusting a shipped claim. If verification finds a substantive issue, revert the feature commit rather than hiding history.\n` +
+    `6. Commit verified work and update ROADMAP.md/CHANGELOG.md only in the dedicated branch. Do not use Claude Code, the local feature-inventor daemon, or workflows/nightly.js.\n` +
     `7. ${
       remotePushAllowed
         ? `You may push ONLY the dedicated review branch after successful independent verification. Never push, merge, or rewrite main/master, and never create a release.`
         : `Do NOT run git push, gh pr create, gh pr merge, or any other remote-mutating command. Leave all commits local to the isolated worktree and report the branch name plus a patch/diff summary.`
     }\n` +
-    `8. End with a concise report containing: cloned commit, worktree path, branch name, candidate outcome, tests run and actual results, commits/reverts, verification findings, remote effects, and any blockers.\n\n` +
-    `Safety constraints: do not access any repository other than the stated remote; do not spend time on unrelated backlog work; ` +
-    `do not ask for broad permissions; do not treat passing unrelated tests as meaningful coverage.`;
+    `8. End with a concise report containing: run ID, approved base commit, actual checked-out commit, worktree path, branch name, candidate outcome, tests run and actual results, commits/reverts, verification findings, remote effects, and any blockers.\n\n` +
+    `Safety constraints: do not ask for broad permissions; do not spend time on unrelated backlog work; do not treat passing unrelated tests as meaningful coverage.`;
 }
 
 /**
@@ -113,15 +116,15 @@ export function buildManusRunPrompt(request: ManusRunTaskRequest): string {
  * visible to the human operator and cannot be silently authorized by this CLI.
  */
 export async function createManusRunTask(request: ManusRunTaskRequest): Promise<ManusRunTask> {
-  if (request.plan.queue.length === 0) {
-    throw new Error("No open Now or Next candidate is available for a Manus run");
+  if (request.proposal.queue.length === 0) {
+    throw new Error("No queued candidate is available in the selected proposal");
   }
   if (request.apiKey.trim() === "") throw new Error("MANUS_API_KEY is required to create a Manus run");
   if (request.repoUrl.trim() === "") throw new Error("A repository origin URL is required to create a Manus run");
 
   const fetchImpl = request.fetchImpl ?? fetch;
   const body: Record<string, unknown> = {
-    title: "Feature Inventor — Manus run",
+    title: `Feature Inventor — Manus run ${request.proposal.runId}`,
     interactive_mode: false,
     share_visibility: "private",
     agent_profile: request.agentProfile ?? "manus-1.6",

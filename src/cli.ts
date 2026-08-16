@@ -21,10 +21,19 @@ import { buildRunPlan, formatRunPlan, type RunPlanData } from "./run-plan.js";
 import { createManusRunTask, type ManusAgentProfile } from "./manus-runtime.js";
 import { buildDoctorData, formatDoctor } from "./doctor.js";
 import { TARGET_MANIFEST_FILENAME, parseTargetManifest } from "./target-manifest.js";
-import { RUN_PROPOSAL_FILENAME, RUNS_DIRECTORY, createRunId, createRunProposal, serializeRunProposal } from "./run-proposal.js";
+import {
+  RUN_PROPOSAL_FILENAME,
+  RUNS_DIRECTORY,
+  createRunId,
+  createRunProposal,
+  parseRunProposal,
+  serializeRunProposal,
+} from "./run-proposal.js";
+import { assertProposalMatchesEnvironment } from "./proposal-execution.js";
 import {
   RUN_JOURNAL_FILENAME,
   appendRunJournalEvents,
+  assertLegalRunTransition,
   createRunJournalEvent,
   parseRunJournalEvents,
   summarizeRunJournal,
@@ -319,37 +328,64 @@ function parseManusAgentProfile(value: string | undefined): ManusAgentProfile | 
 }
 
 /**
- * Creates a Manus task from the portable plan. The CLI never authorizes a
- * remote push by default: both feature-inventor.config.json and this command
- * must explicitly permit it before the submitted task is told it may push a
- * review branch.
+ * Creates a Manus task from one selected proposal. The CLI verifies the
+ * repository origin and target-branch commit before a task is created, then
+ * writes the task identity as the next append-only lifecycle event.
  */
 export async function runManus(repoRoot: string, args: string[]): Promise<void> {
-  if (args[0] !== "run") throw new Error("Usage: feature-inventor manus run [options]");
+  if (args[0] !== "run") throw new Error("Usage: feature-inventor manus run --run RUN_ID [options]");
+  const runId = optionValue(args, "--run");
+  if (!runId || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(runId)) {
+    throw new Error("manus run requires --run RUN_ID from `feature-inventor propose`");
+  }
   const apiKey = process.env.MANUS_API_KEY;
   if (!apiKey) throw new Error("MANUS_API_KEY is required; set it before running `feature-inventor manus run`");
 
-  let repoUrl: string;
-  try {
-    const { stdout } = await execFileAsync("git", ["remote", "get-url", "origin"], { cwd: repoRoot });
-    repoUrl = stdout.trim();
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    throw new Error(`Could not resolve Git remote origin: ${reason}`);
-  }
-  if (!repoUrl) throw new Error("Git remote origin is empty; Manus needs a cloneable repository URL");
+  const proposalPath = join(repoRoot, RUNS_DIRECTORY, runId, RUN_PROPOSAL_FILENAME);
+  const journalPath = join(repoRoot, RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME);
+  const proposalContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_PROPOSAL_FILENAME));
+  const journalContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME));
+  if (proposalContent === null) throw new Error(`No proposal found for ${runId}`);
+  if (journalContent === null) throw new Error(`No journal found for ${runId}`);
+  const proposal = parseRunProposal(proposalContent);
+  if (proposal.runId !== runId) throw new Error(`Proposal run ID ${proposal.runId} does not match requested run ${runId}`);
+
+  const [repoUrl, baseCommit] = await Promise.all([
+    readGitValue(repoRoot, ["remote", "get-url", "origin"]),
+    readGitValue(repoRoot, ["rev-parse", "--verify", `${proposal.target.defaultBranch}^{commit}`]),
+  ]);
+  if (repoUrl === null) throw new Error("Git remote origin is empty; Manus needs a cloneable repository URL");
+  if (baseCommit === null) throw new Error(`Could not resolve configured default branch ${proposal.target.defaultBranch} to a commit`);
+  assertProposalMatchesEnvironment(proposal, { repositoryUrl: repoUrl, baseCommit });
+
+  const events = parseRunJournalEvents(journalContent);
+  const timestamp = new Date().toISOString();
+  const createdEvent = createRunJournalEvent(runId, "task-created", timestamp, { pending: true });
+  assertLegalRunTransition(events, createdEvent);
 
   const task = await createManusRunTask({
     apiKey,
     repoUrl,
-    plan: getRunPlanData(repoRoot),
+    proposal,
     allowRemotePush: args.includes("--allow-remote-push"),
     projectId: optionValue(args, "--project"),
     githubConnectorId: optionValue(args, "--github-connector"),
     agentProfile: parseManusAgentProfile(optionValue(args, "--profile")),
   });
 
-  console.log(`Created Manus run task: ${task.taskTitle}\nTask ID: ${task.taskId}\nTask URL: ${task.taskUrl}`);
+  const recordedEvent = createRunJournalEvent(runId, "task-created", timestamp, {
+    taskId: task.taskId,
+    taskUrl: task.taskUrl,
+    taskTitle: task.taskTitle,
+    baseCommit,
+    proposalPath: join(RUNS_DIRECTORY, runId, RUN_PROPOSAL_FILENAME),
+  });
+  writeFileSync(journalPath, appendRunJournalEvents(journalContent, [recordedEvent]), "utf8");
+
+  console.log(
+    `Created Manus run task for ${runId}: ${task.taskTitle}\nTask ID: ${task.taskId}\nTask URL: ${task.taskUrl}\n` +
+      `Proposal: ${proposalPath}\nJournal: ${journalPath}`,
+  );
 }
 
 function formatDaemonAge(ageMs: number | null): string {
@@ -904,7 +940,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | manus run [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once [--max-features COUNT] | --every DURATION --timeout DURATION --max-features COUNT] [--yolo] [--max-budget-usd AMOUNT] | --help | --version]\n" +
   "  daemon requires an explicit mode: --once runs one bounded cycle (one feature by default); " +
   "--every DURATION enables repeated execution and requires --timeout plus --max-features. " +

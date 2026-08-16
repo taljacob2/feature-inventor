@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
+import { createRunProposal } from "./run-proposal.js";
 import { buildRunPlan } from "./run-plan.js";
 import { buildManusRunPrompt, createManusRunTask } from "./manus-runtime.js";
+import type { TargetManifest } from "./target-manifest.js";
 
 const ROADMAP = `# Roadmap
 
@@ -10,18 +12,38 @@ const ROADMAP = `# Roadmap
 - [ ] Safe candidate — ICE 8/7/6
 `;
 
-function planWithPolicy(remotePushPolicy: "forbidden" | "explicit-only" = "forbidden") {
-  return buildRunPlan(ROADMAP, { ...DEFAULT_RUN_POLICY, remotePushPolicy });
+const MANIFEST: TargetManifest = {
+  schemaVersion: 1,
+  repository: { url: "https://github.com/example/feature-inventor.git", defaultBranch: "master" },
+  goals: ["Improve governed execution"],
+  requiredChecks: ["npm test"],
+  protectedPaths: [],
+  reviewPolicy: { maxFilesChanged: 12, humanApprovalRequired: true },
+  schedule: { mode: "manual" },
+};
+
+function proposalWithPolicy(remotePushPolicy: "forbidden" | "explicit-only" = "forbidden") {
+  const plan = buildRunPlan(ROADMAP, { ...DEFAULT_RUN_POLICY, remotePushPolicy });
+  return createRunProposal({
+    runId: "run-20260817-001",
+    createdAt: "2026-08-17T12:00:00.000Z",
+    baseCommit: "abcdef1234567",
+    manifest: MANIFEST,
+    plan,
+  });
 }
 
 describe("Manus runtime adapter", () => {
-  it("builds a local-only task brief by default", () => {
+  it("builds a local-only task brief from one approved proposal", () => {
     const prompt = buildManusRunPrompt({
       apiKey: "test-key",
       repoUrl: "https://github.com/example/feature-inventor.git",
-      plan: planWithPolicy(),
+      proposal: proposalWithPolicy(),
     });
 
+    expect(prompt).toContain("Run ID: run-20260817-001");
+    expect(prompt).toContain("Approved base commit (authoritative): abcdef1234567");
+    expect(prompt).toContain("Never substitute the current default branch");
     expect(prompt).toContain("Do NOT run git push");
     expect(prompt).toContain("Never modify main or master");
     expect(prompt).toContain("workflows/nightly.js");
@@ -31,7 +53,7 @@ describe("Manus runtime adapter", () => {
     const prompt = buildManusRunPrompt({
       apiKey: "test-key",
       repoUrl: "https://github.com/example/feature-inventor.git",
-      plan: planWithPolicy("explicit-only"),
+      proposal: proposalWithPolicy("explicit-only"),
       allowRemotePush: true,
     });
 
@@ -46,7 +68,7 @@ describe("Manus runtime adapter", () => {
           ok: true,
           task_id: "abcdefghijklmnopqrstuv",
           task_url: "https://manus.im/app/abcdefghijklmnopqrstuv",
-          task_title: "Feature Inventor — Manus run",
+          task_title: "Feature Inventor — Manus run run-20260817-001",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
@@ -55,7 +77,7 @@ describe("Manus runtime adapter", () => {
     const task = await createManusRunTask({
       apiKey: "test-key",
       repoUrl: "https://github.com/example/feature-inventor.git",
-      plan: planWithPolicy(),
+      proposal: proposalWithPolicy(),
       projectId: "project-1",
       githubConnectorId: "github-connector-1",
       fetchImpl,
@@ -68,6 +90,7 @@ describe("Manus runtime adapter", () => {
     expect(init?.headers).toMatchObject({ "x-manus-api-key": "test-key" });
     const body = JSON.parse(String(init?.body));
     expect(body).toMatchObject({
+      title: "Feature Inventor — Manus run run-20260817-001",
       project_id: "project-1",
       interactive_mode: false,
       share_visibility: "private",
@@ -75,7 +98,7 @@ describe("Manus runtime adapter", () => {
     });
   });
 
-  it("rejects a failed API response and an empty execution queue", async () => {
+  it("rejects a failed API response and an empty approved queue", async () => {
     const failedFetch = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ ok: false, error: { message: "permission denied" } }), { status: 403 }),
     );
@@ -84,18 +107,25 @@ describe("Manus runtime adapter", () => {
       createManusRunTask({
         apiKey: "test-key",
         repoUrl: "https://github.com/example/feature-inventor.git",
-        plan: planWithPolicy(),
+        proposal: proposalWithPolicy(),
         fetchImpl: failedFetch,
       }),
     ).rejects.toThrow("permission denied");
 
     const emptyPlan = buildRunPlan("# Roadmap\n\n## Now\n", DEFAULT_RUN_POLICY);
+    const emptyProposal = createRunProposal({
+      runId: "run-20260817-002",
+      createdAt: "2026-08-17T12:00:00.000Z",
+      baseCommit: "abcdef1234567",
+      manifest: MANIFEST,
+      plan: emptyPlan,
+    });
     await expect(
       createManusRunTask({
         apiKey: "test-key",
         repoUrl: "https://github.com/example/feature-inventor.git",
-        plan: emptyPlan,
+        proposal: emptyProposal,
       }),
-    ).rejects.toThrow("No open Now or Next candidate");
+    ).rejects.toThrow("No queued candidate");
   });
 });
