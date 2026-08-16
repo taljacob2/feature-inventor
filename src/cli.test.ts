@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getRunPlanData, printHelp, printRunPlan, printStatus, printVersion, runRecap, runStop } from "./cli.js";
+import { getRunPlanData, parseDaemonOptions, printHelp, printRunPlan, printStatus, printVersion, runRecap, runStop } from "./cli.js";
 import type { StatusData } from "./cli.js";
 import { STOP_FLAG_FILENAME, parseStopFlag } from "./stop-flag.js";
 import { RECAP_STATE_FILENAME, parseRecapState } from "./recap.js";
@@ -708,5 +708,40 @@ describe("printRunPlan", () => {
     expect(data.queue).toHaveLength(1);
     expect(data.queue[0]?.title).toContain("Planned candidate");
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"status": "planned"'));
+  });
+});
+
+
+describe("parseDaemonOptions", () => {
+  it("requires an explicit bounded or repeated execution mode", () => {
+    expect(() => parseDaemonOptions([])).toThrow("requires exactly one execution mode");
+    expect(() => parseDaemonOptions(["--once", "--every", "1d", "--timeout", "2h", "--max-features", "1"])).toThrow(
+      "requires exactly one execution mode",
+    );
+  });
+
+  it("defaults one-shot execution to one feature", () => {
+    expect(parseDaemonOptions(["--once"])).toMatchObject({
+      once: true,
+      intervalMs: 0,
+      maxFeatures: 1,
+    });
+  });
+
+  it("requires both a timeout and feature cap for repeated execution", () => {
+    expect(() => parseDaemonOptions(["--every", "1d"])).toThrow("requires --timeout");
+    expect(() => parseDaemonOptions(["--every", "1d", "--timeout", "2h"])).toThrow("requires --max-features");
+
+    expect(parseDaemonOptions(["--every", "1d", "--timeout", "2h", "--max-features", "2"])).toMatchObject({
+      once: false,
+      intervalMs: 24 * 60 * 60 * 1000,
+      timeoutMs: 2 * 60 * 60 * 1000,
+      maxFeatures: 2,
+    });
+  });
+
+  it("rejects invalid feature caps and budgets", () => {
+    expect(() => parseDaemonOptions(["--once", "--max-features", "0"])).toThrow("positive integer");
+    expect(() => parseDaemonOptions(["--once", "--max-budget-usd", "not-a-number"])).toThrow("positive number");
   });
 });

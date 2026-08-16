@@ -19,6 +19,8 @@ import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
 import { RUN_CONFIG_FILENAME, parseRunConfig } from "./run-config.js";
 import { buildRunPlan, formatRunPlan, type RunPlanData } from "./run-plan.js";
 import { createManusRunTask, type ManusAgentProfile } from "./manus-runtime.js";
+import { buildDoctorData, formatDoctor } from "./doctor.js";
+import { TARGET_MANIFEST_FILENAME, parseTargetManifest } from "./target-manifest.js";
 import { STOP_FLAG_FILENAME, parseStopFlag, serializeStopFlag } from "./stop-flag.js";
 import {
   RECAP_STATE_FILENAME,
@@ -153,6 +155,50 @@ export function getRunPlanData(repoRoot: string): RunPlanData {
 export function printRunPlan(repoRoot: string, options: { json?: boolean } = {}): void {
   const data = getRunPlanData(repoRoot);
   console.log(options.json ? JSON.stringify(data, null, 2) : formatRunPlan(data));
+}
+
+async function readGitValue(repoRoot: string, args: string[]): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", args, { cwd: repoRoot });
+    const value = stdout.trim();
+    return value === "" ? null : value;
+  } catch {
+    return null;
+  }
+}
+
+/** Runs non-mutating target and workspace preflight checks before a governed run. */
+export async function runDoctor(repoRoot: string, options: { json?: boolean } = {}): Promise<void> {
+  const manifestContent = readOptionalFile(repoRoot, TARGET_MANIFEST_FILENAME);
+  let manifest = null;
+  let manifestError: string | null = null;
+  if (manifestContent === null) {
+    manifestError = `${TARGET_MANIFEST_FILENAME} is required; run \`feature-inventor init\` when it is available`;
+  } else {
+    try {
+      manifest = parseTargetManifest(manifestContent);
+    } catch (err) {
+      manifestError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const [gitRoot, originUrl, currentBranch, porcelain] = await Promise.all([
+    readGitValue(repoRoot, ["rev-parse", "--show-toplevel"]),
+    readGitValue(repoRoot, ["remote", "get-url", "origin"]),
+    readGitValue(repoRoot, ["branch", "--show-current"]),
+    readGitValue(repoRoot, ["status", "--porcelain"]),
+  ]);
+  const data = buildDoctorData({
+    repoRoot,
+    gitRoot,
+    originUrl,
+    currentBranch,
+    workspaceClean: porcelain === null ? null : porcelain === "",
+    manifest,
+    manifestError,
+  });
+  console.log(options.json ? JSON.stringify(data, null, 2) : formatDoctor(data));
+  if (!data.ready) process.exitCode = 1;
 }
 
 function optionValue(args: string[], flag: string): string | undefined {
@@ -418,14 +464,17 @@ export function runRecap(
 // present to answer it (confirmed live: a real daemon-spawned run sat
 // blocked on exactly this). Telling it to skip that skill and invoke the
 // Workflow tool directly avoids the deadlock at the source.
-const DAEMON_RUN_PROMPT =
-  "Run the feature-inventor nightly workflow, right now, with no pauses: invoke the Workflow tool " +
-  "directly against workflows/nightly.js with its default args (none needed). The current working " +
-  "directory is already this repo's root. This is an unattended, non-interactive invocation -- " +
-  "nobody is present to answer questions or confirm anything, ever. Do not use /feature-inventor-start " +
-  "or any other skill/command that asks for confirmation before proceeding -- that will hang forever " +
-  "with no one able to respond. Do not ask for confirmation yourself either. Just invoke the Workflow " +
-  "tool immediately with default args.";
+function buildDaemonRunPrompt(maxFeatures: number): string {
+  return (
+    "Run the feature-inventor nightly workflow, right now, with no pauses: invoke the Workflow tool " +
+    `directly against workflows/nightly.js with args ${JSON.stringify({ maxFeatures })}. The current working ` +
+    "directory is already this repo's root. This is an unattended, non-interactive invocation -- " +
+    "nobody is present to answer questions or confirm anything, ever. Do not use /feature-inventor-start " +
+    "or any other skill/command that asks for confirmation before proceeding -- that will hang forever " +
+    "with no one able to respond. Do not ask for confirmation yourself either. Just invoke the Workflow " +
+    "tool immediately with the stated args."
+  );
+}
 
 const DEFAULT_DAEMON_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours -- generous; a real run took ~21 minutes.
 const DEFAULT_DAEMON_POLL_MS = 60 * 1000; // check for completion once a minute while a run is in flight
@@ -441,12 +490,7 @@ function appendDaemonLog(repoRoot: string, entry: DaemonLogEntry): void {
 }
 
 export interface DaemonOptions {
-  /**
-   * How often a new run should be attempted, e.g. from parseIntervalToMs("24h").
-   * Defaults to 0 (continuous churn — isRunDue treats 0 as "always due", so
-   * the next run starts as soon as the previous one finishes). Pass --every
-   * to opt into a slower, interval-based cadence instead.
-   */
+  /** How often a new run should be attempted, e.g. from parseIntervalToMs("24h"). */
   intervalMs: number;
   /** Passes --dangerously-skip-permissions to the spawned headless run. Bypasses ALL permission checks. */
   yolo?: boolean;
@@ -462,8 +506,10 @@ export interface DaemonOptions {
   pollMs?: number;
   /** How often to check whether a new run is due, between cycles (only used when nothing was due). */
   checkMs?: number;
-  /** Run at most one cycle and return, instead of looping forever — for manual testing. */
+  /** Run at most one cycle and return. This is the default safe operating mode. */
   once?: boolean;
+  /** Maximum features passed to the nightly workflow for each spawned cycle. */
+  maxFeatures?: number;
 }
 
 /**
@@ -598,7 +644,7 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
     // expected, check this first.
     claudeArgs.push("--print", "--max-budget-usd", String(options.maxBudgetUsd));
   }
-  claudeArgs.push(DAEMON_RUN_PROMPT);
+  claudeArgs.push(buildDaemonRunPrompt(options.maxFeatures ?? 1));
 
   const spawnResult = await new Promise<{ error: string | null; output: string }>((resolve) => {
     const child = spawn("claude", claudeArgs, { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] });
@@ -713,11 +759,8 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
  */
 export async function runDaemon(repoRoot: string, options: DaemonOptions): Promise<void> {
   console.log(
-    `[daemon] Starting. ${
-      options.intervalMs === 0
-        ? "Continuous churn: starting the next run immediately after each one finishes."
-        : `Interval mode: a new run is due every ${options.intervalMs}ms.`
-    }` +
+    `[daemon] Starting. ${options.once ? "One bounded cycle." : `Interval mode: a new run is due every ${options.intervalMs}ms.`} ` +
+      `Maximum features per cycle: ${options.maxFeatures ?? 1}.` +
       (options.yolo ? " Unattended mode (--yolo): permission checks bypassed for spawned runs." : "") +
       (options.maxBudgetUsd !== undefined ? ` Per-run budget cap: $${options.maxBudgetUsd}.` : ""),
   );
@@ -736,11 +779,11 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | plan [--json] | manus run [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
-  "daemon [clean | --every DURATION] [--yolo] [--max-budget-usd AMOUNT] [--once] | --help | --version]\n" +
-  "  daemon defaults to continuous churn (no --every: the next run starts as soon as the previous " +
-  "one finishes). Pass --every DURATION (e.g. 12h, 1d) to slow that down instead. --max-budget-usd " +
-  "is optional and off by default.\n" +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | manus run [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "daemon [clean | --once [--max-features COUNT] | --every DURATION --timeout DURATION --max-features COUNT] [--yolo] [--max-budget-usd AMOUNT] | --help | --version]\n" +
+  "  daemon requires an explicit mode: --once runs one bounded cycle (one feature by default); " +
+  "--every DURATION enables repeated execution and requires --timeout plus --max-features. " +
+  "--max-budget-usd is optional and off by default.\n" +
   "  daemon clean stops leftover stuck/idle background sessions from previous daemon runs against " +
   "this repo (never touches actively-busy sessions or unrelated background work).";
 
@@ -766,12 +809,57 @@ export function printVersion(packageRoot: string = join(dirname(fileURLToPath(im
   console.log(parsed.version ?? "unknown");
 }
 
+function parsePositiveInteger(value: string, flag: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${flag} must be a positive integer`);
+  return parsed;
+}
+
+function parsePositiveNumber(value: string, flag: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${flag} must be a positive number`);
+  return parsed;
+}
+
+/** Parses the explicit daemon modes without starting a process, keeping safety defaults testable. */
+export function parseDaemonOptions(args: string[]): DaemonOptions {
+  const once = args.includes("--once");
+  const every = optionValue(args, "--every");
+  const timeout = optionValue(args, "--timeout");
+  const poll = optionValue(args, "--poll");
+  const budget = optionValue(args, "--max-budget-usd");
+  const maxFeatures = optionValue(args, "--max-features");
+
+  if (once === Boolean(every)) {
+    throw new Error("daemon requires exactly one execution mode: --once or --every DURATION");
+  }
+  if (every && !timeout) {
+    throw new Error("repeated daemon execution requires --timeout DURATION");
+  }
+  if (every && !maxFeatures) {
+    throw new Error("repeated daemon execution requires --max-features COUNT");
+  }
+
+  return {
+    intervalMs: every ? parseIntervalToMs(every) : 0,
+    timeoutMs: timeout ? parseIntervalToMs(timeout) : undefined,
+    pollMs: poll ? parseIntervalToMs(poll) : undefined,
+    maxBudgetUsd: budget ? parsePositiveNumber(budget, "--max-budget-usd") : undefined,
+    maxFeatures: maxFeatures ? parsePositiveInteger(maxFeatures, "--max-features") : 1,
+    yolo: args.includes("--yolo") || args.includes("--unattended"),
+    once,
+  };
+}
+
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
 
   switch (command ?? "status") {
     case "status":
       printStatus(process.cwd(), { json: rest.includes("--json") });
+      break;
+    case "doctor":
+      await runDoctor(process.cwd(), { json: rest.includes("--json") });
       break;
     case "plan":
       printRunPlan(process.cwd(), { json: rest.includes("--json") });
@@ -798,21 +886,7 @@ async function main(): Promise<void> {
         await cleanStaleSessions(process.cwd());
         break;
       }
-      const everyIndex = rest.indexOf("--every");
-      const pollIndex = rest.indexOf("--poll");
-      const timeoutIndex = rest.indexOf("--timeout");
-      const budgetIndex = rest.indexOf("--max-budget-usd");
-      await runDaemon(process.cwd(), {
-        // Default: continuous churn (0 = always due, see isRunDue). --every
-        // opts into a slower, interval-based cadence instead.
-        intervalMs: everyIndex !== -1 ? parseIntervalToMs(rest[everyIndex + 1]!) : 0,
-        pollMs: pollIndex !== -1 ? parseIntervalToMs(rest[pollIndex + 1]!) : undefined,
-        timeoutMs: timeoutIndex !== -1 ? parseIntervalToMs(rest[timeoutIndex + 1]!) : undefined,
-        // Optional, off by default -- no cost ceiling unless explicitly asked for.
-        maxBudgetUsd: budgetIndex !== -1 ? Number(rest[budgetIndex + 1]) : undefined,
-        yolo: rest.includes("--yolo") || rest.includes("--unattended"),
-        once: rest.includes("--once"),
-      });
+      await runDaemon(process.cwd(), parseDaemonOptions(rest));
       break;
     }
     case "--help":

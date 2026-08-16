@@ -2,21 +2,21 @@
 
 ## What this is
 
-Feature Inventor is a self-hosted, self-growing project. It has no fixed
-product spec — instead it runs a nightly autonomous loop (research → prioritize
-→ implement → sanity-check → commit → update roadmap → re-evaluate) that
-invents features and builds them into *this very repo*, forever. There is
-never a "finished" version — the roadmap is designed to regenerate its own
-horizon every time it gets close to empty.
+Feature Inventor is a governed autonomous improvement harness for one
+repository at a time. It turns an operator-owned target, goals, and backlog
+into a bounded run that researches, prioritizes, implements, verifies, and
+produces an evidence-backed review candidate.
 
-v0 is deliberately small: just enough of a loop, a CLI, and a persistent
-roadmap/changelog for the system to start improving itself. Everything else —
-a dashboard, notifications, richer prioritization, support for targeting
-other repositories — is expected to be *invented by the loop itself* rather
-than hand-built up front. If "point this at another repo" turns out to be
-valuable, that should show up as an entry in ROADMAP.md that the loop
-proposes and ships on its own, not a day-one assumption baked into the
-architecture.
+Feature Inventor itself is the reference target used to dogfood the harness.
+Its self-improving loop is valuable evidence, but it is not permission for
+unbounded autonomous work. Every normal run must be explicitly bounded by a
+target commit, feature cap, timeout, validation policy, and remote-effect
+policy. See `ARCHITECTURE.md` for the product contract and migration plan.
+
+v0 remains deliberately small: one target repository, a CLI, durable evidence,
+and human review before any default-branch or production effect. A dashboard,
+fleet management, and multi-tenant hosting are deferred until the
+single-repository operating model is proven.
 
 ## Prior art & where we sit on the safety spectrum
 
@@ -52,13 +52,11 @@ script: the bar for "done" is the same as any tool meant to be handed to a
 stranger and trusted — real tests, no hardcoded personal assumptions,
 documented behavior.
 
-The current runtime is native Claude Code automation (scheduled nightly via
-`CronCreate`, orchestrated via `Workflow`, git for history/rollback) because
-that's the fastest honest path to a working v0 — not because the product is
-scoped to Claude Code users. It should be built so that a *future* pivot —
-turning the engine into a hosted service via the Claude Agent SDK, usable by
-people who don't have Claude Code at all — is a matter of swapping the
-runtime adapter, not rewriting the core logic. Concretely, this means:
+The current runtime includes native Claude Code automation and a bounded
+Manus task adapter. Neither runtime is the source of product behavior. The
+product should be built so that future runtimes are a matter of swapping an
+adapter, not rewriting core lifecycle, policy, evidence, and review logic.
+Concretely, this means:
 - Prioritization rules, the definition of a "quick win," sanity-check
   criteria, and re-evaluation logic live in plain files (markdown/config),
   not hardcoded inside Workflow scripts — so they're readable/portable
@@ -90,13 +88,17 @@ Delight is measured by how good that check-in feels, not by feature count.
 3. **Always leave a roadmap.** Every run ends with ROADMAP.md refreshed —
    near-term items re-prioritized, and at least one new horizon item added
    so the backlog never visibly runs out.
-4. **Re-evaluate continuously.** After each feature (and again at the end of
-   a run), the loop reviews its own recent work: was the priority call
-   right, did tests actually cover the risk, should anything be revisited?
-5. **Draw ideas from multiple sources**: the existing code/docs, web research
+4. **Re-evaluate with evidence.** After each feature and at the end of a
+   run, record the priority call, validation evidence, verification result,
+   and human-review recommendation. Agent self-assessment is a signal, not
+   proof of value or correctness.
+5. **Bound repeated execution explicitly.** One governed run is the default.
+   Any schedule requires a cadence, feature cap, timeout, pause control, and
+   durable recovery evidence.
+6. **Draw ideas from multiple sources**: the existing code/docs, web research
    on comparable tools, this vision doc, and — once there's real usage —
    actual feedback signals.
-6. **Survive compaction.** None of the above should live only in
+7. **Survive compaction.** None of the above should live only in
    conversation context. Vision, roadmap, changelog, and operating
    principles are all files in this repo specifically so a compacted or
    fresh context can pick the loop back up without losing the thread.
