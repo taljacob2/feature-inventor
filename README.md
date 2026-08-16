@@ -280,77 +280,33 @@ If you're using Claude Code directly, `/feature-inventor-status`,
 `/feature-inventor-recap`, and `/feature-inventor-stop` wrap these same
 commands as slash commands (see `.claude/commands/`).
 
-### Starting a run
+### Starting a governed run
 
-There's no `feature-inventor start` CLI command — the CLI is a plain Node
-program and only the `Workflow` tool can actually execute
-`workflows/nightly.js`. In a Claude Code session you can just ask directly
-("run the nightly workflow") and it'll invoke the `Workflow` tool itself;
-`/feature-inventor-start` is a convenience shortcut for the same thing
-(optionally passing `maxFeatures`/`branchName`/`repoRoot`), not the only way
-to do it.
-
-### Running a bounded daemon cycle
-
-A daemon cycle is **not** started implicitly. Use one bounded cycle for normal operation:
+New execution begins with an explicit, immutable proposal rather than the historical `Workflow` script. After `doctor` passes, create and inspect a proposal, then choose one supported runtime:
 
 ```sh
-feature-inventor daemon --once --max-features 1 --yolo
+feature-inventor propose
+feature-inventor journal RUN_ID
+feature-inventor claude run --run RUN_ID
+# or: feature-inventor manus run --run RUN_ID
 ```
 
-Repeated execution is an explicit scheduling choice. It requires a cadence, a timeout, and a feature cap:
+Both paths require the selected proposal’s exact base commit, use an isolated workspace, write a structured runtime result, and leave finalization behind the evidence-backed review gate. They do not push or merge by default.
+
+### Scheduling handoffs
+
+The old `feature-inventor daemon` is **retired**. It fails closed and no longer launches `workflows/nightly.js`, because that path cannot enforce the proposal, worktree, runtime-result, and review contract. `daemon clean` remains available solely to stop stale background sessions created by earlier versions.
+
+To prepare one reviewed proposal for a scheduler configured outside this repository, write an exact non-executing handoff:
 
 ```sh
-feature-inventor daemon --every 24h --timeout 2h --max-features 1 --yolo
+feature-inventor schedule handoff RUN_ID --runtime claude
+# or: feature-inventor schedule handoff RUN_ID --runtime manus
 ```
 
-A repeated run remains a significant trust decision because `--yolo` bypasses permission prompts for the spawned Claude Code session. Start with one bounded, reviewable cycle and enable repetition only after the target has passed `doctor` and the resulting review packets are consistently useful.
+The handoff is stored inside the run directory and contains only the approved run ID, immutable proposal identity, selected runtime, and exact permitted command. It does **not** register a timer, start a process, provide credentials, or execute any work. Status shows the recorded handoff next to the governed run.
 
-**Auth**: if you're already logged in on this machine (check with
-`claude auth status`), that's enough — the same login carries through to the
-headless `claude --bg` calls the daemon spawns, no extra setup needed.
-`claude setup-token` (a separate, longer-lived credential) is only for a
-machine that's never done an interactive login at all — a fresh CI runner or
-headless server, not a normal dev machine you already use Claude Code on. If
-the daemon ever starts silently failing to authenticate after running for a
-long stretch (days/weeks), that's the first thing to check — an interactive
-session's credential may not last as long as a dedicated token; re-run
-`claude auth login` (or set up a token at that point) to refresh it.
-
-`feature-inventor daemon` is a long-running process that decides on its own
-when a run is due (based on `.feature-inventor-last-run.json`'s timestamp)
-and spawns a headless Claude Code invocation (`claude --bg`) to actually run
-it, waiting for it to genuinely finish before considering that cycle done.
-This is feature-inventor's *own* scheduler — not the OS's cron/Task
-Scheduler (no OS-specific setup needed) and not Claude Code's `CronCreate`
-(which is session-only, gone if that session ends, and auto-expires after 7
-days — not a fit for "runs for months").
-
-The legacy Claude daemon remains a transitional execution path. It now
-requires an explicit bounded mode, but it does not yet create a runner-owned
-worktree. Do not run it from a checkout that is being edited interactively;
-use the Manus path for an isolated task workspace until the shared adapter
-migration is complete. Nothing reaches `main`/`master` without a human merge.
-
-- `--once` — run one bounded cycle, which is the required safe mode when no schedule is intended.
-- `--every DURATION` — enable repeated execution at an explicit fixed cadence (for example, `12h` or `1d`). It requires both `--timeout` and `--max-features`.
-- `--yolo` (or `--unattended`) — bypasses Claude Code's permission prompts
-  for the spawned runs (`--dangerously-skip-permissions` under the hood).
-  This is a real trust decision — the spawned session can read/write files
-  and run shell commands with nothing asking you to confirm — appropriate
-  for this project's explicitly autonomous premise, but worth knowing what
-  it actually does rather than just treating it as a fun flag name.
-- `--max-budget-usd AMOUNT` — optional, **off by default**: a hard per-run
-  spending cap passed through to the spawned `claude` invocation. It is an
-  additional guard for an explicitly scheduled run, not a substitute for the
-  required cadence, timeout, and feature cap.
-- `--max-features COUNT` — bound how many features the spawned workflow may ship in each cycle. It defaults to one for `--once` and is required for `--every`.
-
-**Known limitations**: this process itself has to keep running for the
-schedule to fire at all, and the legacy Claude daemon has not yet been moved
-to a runner-created worktree. A reboot, a killed process, or concurrent
-interactive editing therefore requires operator attention. The shared
-run-journal and isolated-workspace migration is tracked in `ARCHITECTURE.md`.
+A durable recurring scheduler is intentionally deferred until a deployment target and frequency are chosen. A low-frequency, AI-judgment schedule and a persistent local or hosted runner have different operational and cost trade-offs; neither should be inferred from a handoff artifact. Until that decision is implemented, the handoff preserves a reviewable, fail-closed boundary.
 
 Run the test suite and type-check the same way the loop does:
 

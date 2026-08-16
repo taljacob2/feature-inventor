@@ -19,6 +19,14 @@ import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
 import { RUN_CONFIG_FILENAME, parseRunConfig } from "./run-config.js";
 import { buildRunPlan, formatRunPlan, type RunPlanData } from "./run-plan.js";
 import { createManusRunTask, type ManusAgentProfile } from "./manus-runtime.js";
+import {
+  SCHEDULE_HANDOFF_FILENAME,
+  assertScheduleHandoffMatchesProposal,
+  createScheduleHandoff,
+  parseScheduleHandoff,
+  serializeScheduleHandoff,
+  type ScheduledRuntime,
+} from "./schedule-handoff.js";
 import { runClaudeCodeProposal } from "./claude-runtime.js";
 import { buildDoctorData, formatDoctor } from "./doctor.js";
 import { TARGET_MANIFEST_FILENAME, parseTargetManifest } from "./target-manifest.js";
@@ -119,6 +127,7 @@ const NEXT_PREVIEW_LIMIT = 3;
 
 export interface GovernedRunStatus extends RunJournalSummary {
   reviewReadiness: "pending" | "blocked" | "ready-to-finalize" | null;
+  scheduledRuntime: ScheduledRuntime | null;
 }
 
 export interface StatusData {
@@ -154,7 +163,9 @@ export function getGovernedRunSummaries(repoRoot: string): GovernedRunStatus[] {
       .map((entry) => {
         const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, entry.name, RUN_JOURNAL_FILENAME));
         const reviewContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, entry.name, REVIEW_PACKET_FILENAME));
+        const handoffContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, entry.name, SCHEDULE_HANDOFF_FILENAME));
         let reviewReadiness: GovernedRunStatus["reviewReadiness"] = null;
+        let scheduledRuntime: GovernedRunStatus["scheduledRuntime"] = null;
         if (reviewContent !== null) {
           try {
             reviewReadiness = parseReviewPacket(reviewContent).readiness;
@@ -162,7 +173,17 @@ export function getGovernedRunSummaries(repoRoot: string): GovernedRunStatus[] {
             reviewReadiness = null;
           }
         }
-        return { ...summarizeRunJournal(entry.name, content ? parseRunJournalEvents(content) : []), reviewReadiness };
+        if (handoffContent !== null) {
+          try {
+            const proposal = loadProposalForRun(repoRoot, entry.name);
+            const handoff = parseScheduleHandoff(handoffContent);
+            assertScheduleHandoffMatchesProposal(handoff, proposal);
+            scheduledRuntime = handoff.runtime;
+          } catch {
+            scheduledRuntime = null;
+          }
+        }
+        return { ...summarizeRunJournal(entry.name, content ? parseRunJournalEvents(content) : []), reviewReadiness, scheduledRuntime };
       })
       .filter((summary) => summary.eventCount > 0)
       .sort((left, right) => (right.startedAt ?? "").localeCompare(left.startedAt ?? ""));
@@ -333,6 +354,52 @@ export async function runPropose(repoRoot: string, options: { json?: boolean } =
   console.log(`Journal: ${journalPath}`);
   if (warnings.length > 0) console.log(`Manifest warnings: ${warnings.join("; ")}`);
   console.log("No agent was started and no repository change was made.");
+}
+
+/**
+ * Writes a reviewable scheduler handoff for one already-approved proposal.
+ * This command intentionally schedules and executes nothing by itself.
+ */
+export function runSchedule(repoRoot: string, args: string[]): void {
+  if (args[0] !== "handoff") {
+    throw new Error("Usage: feature-inventor schedule handoff RUN_ID --runtime claude|manus [--json]");
+  }
+  const runId = args[1];
+  if (!runId || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(runId)) {
+    throw new Error("schedule handoff requires RUN_ID from `feature-inventor propose`");
+  }
+  const runtimeValue = optionValue(args, "--runtime");
+  if (runtimeValue !== "claude" && runtimeValue !== "manus") {
+    throw new Error("schedule handoff requires --runtime claude or --runtime manus");
+  }
+  const proposal = loadProposalForRun(repoRoot, runId);
+  const runDirectory = join(repoRoot, RUNS_DIRECTORY, runId);
+  const handoffPath = join(runDirectory, SCHEDULE_HANDOFF_FILENAME);
+  const existingHandoff = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, SCHEDULE_HANDOFF_FILENAME));
+  if (existingHandoff !== null) {
+    const handoff = parseScheduleHandoff(existingHandoff);
+    assertScheduleHandoffMatchesProposal(handoff, proposal);
+    if (handoff.runtime !== runtimeValue) throw new Error(`Run ${runId} already has a handoff for ${handoff.runtime}`);
+    const data = { runId, handoffPath, handoff, created: false };
+    console.log(args.includes("--json") ? JSON.stringify(data, null, 2) : `Existing ${handoff.runtime} handoff: ${handoffPath}`);
+    return;
+  }
+  const { content: journalContent, events } = loadJournalForRun(repoRoot, runId);
+  const handoff = createScheduleHandoff(proposal, runtimeValue, new Date().toISOString());
+  const event = createRunJournalEvent(runId, "schedule-handoff-created", handoff.createdAt, {
+    runtime: handoff.runtime,
+    handoffPath: join(RUNS_DIRECTORY, runId, SCHEDULE_HANDOFF_FILENAME),
+    command: handoff.command,
+  });
+  assertLegalRunTransition(events, event);
+  writeFileSync(handoffPath, serializeScheduleHandoff(handoff), "utf8");
+  writeFileSync(journalPathForRun(repoRoot, runId), appendRunJournalEvents(journalContent, [event]), "utf8");
+  const data = { runId, handoffPath, handoff, created: true };
+  console.log(
+    args.includes("--json")
+      ? JSON.stringify(data, null, 2)
+      : `Created ${handoff.runtime} schedule handoff: ${handoffPath}\nNo scheduler was started. An external scheduler may invoke exactly: ${handoff.command}`,
+  );
 }
 
 function parseRunIdArgument(command: string, args: string[]): string {
@@ -779,7 +846,8 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
     console.log("Governed runs:");
     for (const run of governedRuns) {
       const review = run.reviewReadiness ? `, review ${run.reviewReadiness}` : "";
-      console.log(`  ${run.runId}: ${run.status}${review}, ${run.eventCount} event(s), latest ${run.latestEvent?.type ?? "(none)"}`);
+      const scheduled = run.scheduledRuntime ? `, handoff ${run.scheduledRuntime}` : "";
+      console.log(`  ${run.runId}: ${run.status}${review}${scheduled}, ${run.eventCount} event(s), latest ${run.latestEvent?.type ?? "(none)"}`);
     }
     console.log("");
   }
@@ -820,7 +888,9 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
     `\nBacklog: ${backlogCounts.next} in Next, ${backlogCounts.later} in Later, ${backlogCounts.horizon} in Horizon.`,
   );
 
-  console.log("\nDaemon health:");
+  console.log("\nLegacy daemon (retired):");
+  console.log("  No new cycle is started by `feature-inventor daemon`. Use a reviewed schedule handoff for one governed proposal instead.");
+  console.log("  Historical daemon log:");
   if (daemonHealth.lastCycle === null) {
     console.log("  NO CYCLE DATA — no daemon cycle has been recorded yet.");
   } else {
@@ -988,7 +1058,11 @@ function buildDaemonRunPrompt(maxFeatures: number): string {
   );
 }
 
-const DEFAULT_DAEMON_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours -- generous; a real run took ~21 minutes.
+export const LEGACY_DAEMON_RETIRED_MESSAGE =
+  "The legacy daemon is retired because it launches the archived nightly workflow outside the governed proposal contract. " +
+  "Create a proposal, then run `feature-inventor claude run --run RUN_ID` or `feature-inventor manus run --run RUN_ID`.";
+
+const DEFAULT_DAEMON_TIMEOUT_MS = 2 * 60 * 60 * 1000; // Kept only to interpret historical daemon log entries.
 const DEFAULT_DAEMON_POLL_MS = 60 * 1000; // check for completion once a minute while a run is in flight
 const DEFAULT_DAEMON_CHECK_MS = 5 * 60 * 1000; // how often to check whether a new run is due
 
@@ -1270,33 +1344,17 @@ export async function runDaemonCycleIfDue(repoRoot: string, options: DaemonOptio
  * CONTRIBUTING.md for the planned follow-up (registering auto-start on boot).
  */
 export async function runDaemon(repoRoot: string, options: DaemonOptions): Promise<void> {
-  console.log(
-    `[daemon] Starting. ${options.once ? "One bounded cycle." : `Interval mode: a new run is due every ${options.intervalMs}ms.`} ` +
-      `Maximum features per cycle: ${options.maxFeatures ?? 1}.` +
-      (options.yolo ? " Unattended mode (--yolo): permission checks bypassed for spawned runs." : "") +
-      (options.maxBudgetUsd !== undefined ? ` Per-run budget cap: $${options.maxBudgetUsd}.` : ""),
-  );
-
-  for (;;) {
-    const result = await runDaemonCycleIfDue(repoRoot, options);
-    if (options.once) return;
-    if (result === null) {
-      // Nothing was due this check -- wait before checking again rather than
-      // busy-looping. If a cycle DID just run, skip this wait and loop back
-      // immediately, so continuous churn (intervalMs=0) has no artificial
-      // gap between one run finishing and the next one starting.
-      await sleep(options.checkMs ?? DEFAULT_DAEMON_CHECK_MS);
-    }
-  }
+  void repoRoot;
+  void options;
+  throw new Error(LEGACY_DAEMON_RETIRED_MESSAGE);
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
-  "daemon [clean | --once [--max-features COUNT] | --every DURATION --timeout DURATION --max-features COUNT] [--yolo] [--max-budget-usd AMOUNT] | --help | --version]\n" +
-  "  daemon requires an explicit mode: --once runs one bounded cycle (one feature by default); " +
-  "--every DURATION enables repeated execution and requires --timeout plus --max-features. " +
-  "--max-budget-usd is optional and off by default.\n" +
-  "  daemon clean stops leftover stuck/idle background sessions from previous daemon runs against " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "daemon [clean | --once | --every DURATION ...] | --help | --version]\n" +
+  "  daemon execution is retired and fails closed because it used the archived nightly workflow. " +
+  "Use `schedule handoff RUN_ID --runtime claude|manus` to write an exact proposal-pinned handoff instead.\n" +
+  "  daemon clean still stops leftover stuck/idle background sessions from prior daemon runs against " +
   "this repo (never touches actively-busy sessions or unrelated background work).";
 
 /**
@@ -1402,6 +1460,9 @@ async function main(): Promise<void> {
       break;
     case "manus":
       await runManus(process.cwd(), rest);
+      break;
+    case "schedule":
+      runSchedule(process.cwd(), rest);
       break;
     case "claude":
       await runClaude(process.cwd(), rest);
