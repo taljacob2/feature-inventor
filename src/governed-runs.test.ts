@@ -41,7 +41,17 @@ describe("governed run views", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     runRecap(directory, { all: true, peek: true, json: true });
     const recap = JSON.parse(log.mock.calls[0]![0] as string) as { governedRuns: Array<{ runId: string; status: string }> };
-    expect(recap.governedRuns).toEqual([{ runId: RUN_ID, status: "finalized", eventCount: 3, latestEvent: expect.any(Object), startedAt: "2026-08-17T12:00:00.000Z", finalizedAt: "2026-08-17T12:00:02.000Z" }]);
+    expect(recap.governedRuns).toEqual([
+      {
+        runId: RUN_ID,
+        status: "finalized",
+        eventCount: 3,
+        latestEvent: expect.any(Object),
+        startedAt: "2026-08-17T12:00:00.000Z",
+        finalizedAt: "2026-08-17T12:00:02.000Z",
+        reviewReadiness: null,
+      },
+    ]);
   });
 
   it("renders one journal without modifying the journal itself", () => {
