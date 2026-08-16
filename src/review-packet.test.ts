@@ -41,11 +41,11 @@ function stoppedOutcome() {
 }
 
 describe("review packet", () => {
-  it("is ready only when a stopped task outcome and all required passing checks are present", () => {
+  it("is ready only when a stopped task outcome, captured runtime artifact, and all required passing checks are present", () => {
     const packet = createReviewPacket(proposal(), "2026-08-17T00:02:00.000Z", stoppedOutcome(), [
       { check: "npm test", outcome: "passed", recordedAt: "2026-08-17T00:01:30.000Z", evidence: "157 tests passed" },
       { check: "npm run build", outcome: "passed", recordedAt: "2026-08-17T00:01:40.000Z", evidence: "tsc exited 0" },
-    ]);
+    ], true);
     expect(packet).toMatchObject({ readiness: "ready-to-finalize", missingChecks: [], failedChecks: [] });
   });
 
@@ -56,7 +56,7 @@ describe("review packet", () => {
     const blocked = createReviewPacket(proposal(), "2026-08-17T00:02:00.000Z", stoppedOutcome(), [
       { check: "npm test", outcome: "failed", recordedAt: "2026-08-17T00:01:30.000Z", evidence: "one test failed" },
       { check: "npm run build", outcome: "passed", recordedAt: "2026-08-17T00:01:40.000Z", evidence: "tsc exited 0" },
-    ]);
+    ], true);
     expect(blocked).toMatchObject({ readiness: "blocked", failedChecks: ["npm test"] });
   });
 

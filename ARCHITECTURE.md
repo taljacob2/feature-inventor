@@ -42,7 +42,7 @@ RunRequest
   -> Finalized | Failed
 ```
 
-The proposal and versioned append-only run journal are implemented under `.feature-inventor/runs/<run-id>/`. `status` and `recap` derive governed-run summaries from the journal. The Manus adapter requires a selected proposal, verifies the local origin and approved default-branch commit, and records `task-created` after the external task is accepted. Passive `watch` and `recover` commands record task progress, waiting states, API errors, and task completion idempotently. `capture`, `verify`, and `review` retain a task outcome and append-only check evidence in the run directory. A run finalizes only after an explicit local confirmation against a packet that matches the immutable proposal, records a stopped task outcome, and contains passing evidence for every required check.
+The proposal and versioned append-only run journal are implemented under `.feature-inventor/runs/<run-id>/`. `status` and `recap` derive governed-run summaries from the journal. The Manus adapter requires a selected proposal, verifies the local origin and approved default-branch commit, records `task-created` after the external task is accepted, and requests a strict structured runtime result when the task finishes. Passive `watch` and `recover` commands record task progress, waiting states, API errors, and task completion idempotently. `capture` retains both the passive task outcome and an immutable-matching `runtime-result.json` containing workspace, branch, commit, patch, verification, remote-effect, and blocker evidence. `review` derives required-check evidence from that result; `verify` adds only supplementary local evidence. A run finalizes only after an explicit local confirmation against a packet that matches the immutable proposal, a stopped task outcome, a valid runtime result, and passing evidence for every required check.
 
 ## Adapter responsibilities
 
@@ -57,8 +57,8 @@ The implementation order is deliberate:
 1. **Complete:** Make bounded execution the default and document the product boundary.
 2. **Complete:** Add a target manifest and `doctor` preflight.
 3. **Foundation complete:** Add commit-pinned proposals and an append-only run journal.
-4. **In progress:** Move policy and lifecycle enforcement into shared core modules; Manus verifies proposal identity, journals task status, and gates finalization on review evidence.
-5. Convert remaining runtime-specific execution paths into adapters and capture agent-produced workspace, commit, and verification artifacts.
+4. **In progress:** Move policy and lifecycle enforcement into shared core modules; Manus verifies proposal identity, journals task status, captures structured runtime artifacts, and gates finalization on review evidence.
+5. Convert remaining runtime-specific execution paths into adapters that produce the same structured result contract.
 6. Add risk-aware verification policies and richer review packets from captured artifacts.
 7. Enable explicit scheduling only after bounded-run recovery is reliable.
 8. Support a selected external target repository only after the shared engine is proven.

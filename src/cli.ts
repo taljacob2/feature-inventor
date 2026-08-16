@@ -37,6 +37,14 @@ import {
   type ManusTaskSnapshot,
 } from "./manus-monitor.js";
 import {
+  RUNTIME_RESULT_FILENAME,
+  assertRuntimeResultMatchesProposal,
+  deriveVerificationEvidence,
+  parseRuntimeResult,
+  parseRuntimeResultFile,
+  serializeRuntimeResult,
+} from "./runtime-result.js";
+import {
   REVIEW_PACKET_FILENAME,
   TASK_OUTCOME_FILENAME,
   VERIFICATION_EVIDENCE_FILENAME,
@@ -411,6 +419,7 @@ function getRunArtifactPaths(repoRoot: string, runId: string) {
     outcomePath: join(runDirectory, TASK_OUTCOME_FILENAME),
     verificationPath: join(runDirectory, VERIFICATION_EVIDENCE_FILENAME),
     reviewPath: join(runDirectory, REVIEW_PACKET_FILENAME),
+    runtimeResultPath: join(runDirectory, RUNTIME_RESULT_FILENAME),
   };
 }
 
@@ -431,7 +440,8 @@ function loadJournalForRun(repoRoot: string, runId: string) {
 /** Captures the latest passive external task outcome into a durable local artifact. */
 export async function runCapture(repoRoot: string, args: string[]): Promise<void> {
   const runId = parseRunIdArgument("capture", args);
-  const { journalPath, outcomePath } = getRunArtifactPaths(repoRoot, runId);
+  const { journalPath, outcomePath, runtimeResultPath } = getRunArtifactPaths(repoRoot, runId);
+  const proposal = loadProposalForRun(repoRoot, runId);
   const { content: journalContent, events } = loadJournalForRun(repoRoot, runId);
   const taskId = taskIdFromJournal(events);
   if (taskId === null) throw new Error(`Run ${runId} has no recorded Manus task to capture`);
@@ -456,7 +466,23 @@ export async function runCapture(repoRoot: string, args: string[]): Promise<void
     error: snapshot.error,
   });
   writeFileSync(outcomePath, serializeTaskOutcome(outcome), "utf8");
-  const data = { runId, outcomePath, outcome, journalEventAppended };
+  let runtimeResultError: string | null = null;
+  let runtimeResultCaptured = false;
+  if (snapshot.structuredOutput !== null) {
+    if (!snapshot.structuredOutput.success) {
+      runtimeResultError = snapshot.structuredOutput.error ?? "Task structured-output extraction was not successful";
+    } else {
+      try {
+        const runtimeResult = parseRuntimeResult(snapshot.structuredOutput.value);
+        assertRuntimeResultMatchesProposal(runtimeResult, proposal);
+        writeFileSync(runtimeResultPath, serializeRuntimeResult(runtimeResult), "utf8");
+        runtimeResultCaptured = true;
+      } catch (err) {
+        runtimeResultError = err instanceof Error ? err.message : String(err);
+      }
+    }
+  }
+  const data = { runId, outcomePath, outcome, runtimeResultPath, runtimeResultCaptured, runtimeResultError, journalEventAppended };
   console.log(args.includes("--json") ? JSON.stringify(data, null, 2) : `Captured ${snapshot.status} task outcome: ${outcomePath}`);
 }
 
@@ -483,15 +509,30 @@ export function runVerify(repoRoot: string, args: string[]): void {
 export function runReview(repoRoot: string, args: string[]): void {
   const runId = parseRunIdArgument("review", args);
   const proposal = loadProposalForRun(repoRoot, runId);
-  const { outcomePath, verificationPath, reviewPath } = getRunArtifactPaths(repoRoot, runId);
+  const { outcomePath, verificationPath, reviewPath, runtimeResultPath } = getRunArtifactPaths(repoRoot, runId);
   const outcomeContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, TASK_OUTCOME_FILENAME));
   const verificationContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, VERIFICATION_EVIDENCE_FILENAME));
+  const runtimeResultContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUNTIME_RESULT_FILENAME));
   const taskOutcome = outcomeContent === null ? null : parseTaskOutcome(outcomeContent);
   if (taskOutcome !== null && taskOutcome.runId !== runId) throw new Error(`Task outcome run ID does not match ${runId}`);
-  const verification = verificationContent === null ? [] : parseVerificationEvidence(verificationContent);
-  const packet = createReviewPacket(proposal, new Date().toISOString(), taskOutcome, verification);
+  const manualVerification = verificationContent === null ? [] : parseVerificationEvidence(verificationContent);
+  const runtimeVerification =
+    runtimeResultContent === null
+      ? []
+      : (() => {
+          const runtimeResult = parseRuntimeResultFile(runtimeResultContent);
+          assertRuntimeResultMatchesProposal(runtimeResult, proposal);
+          return deriveVerificationEvidence(runtimeResult, proposal, new Date().toISOString());
+        })();
+  const packet = createReviewPacket(
+    proposal,
+    new Date().toISOString(),
+    taskOutcome,
+    [...runtimeVerification, ...manualVerification],
+    runtimeResultContent !== null,
+  );
   writeFileSync(reviewPath, serializeReviewPacket(packet), "utf8");
-  const data = { runId, reviewPath, packet, outcomePath, verificationPath };
+  const data = { runId, reviewPath, packet, outcomePath, verificationPath, runtimeResultPath, runtimeEvidenceCount: runtimeVerification.length };
   console.log(args.includes("--json") ? JSON.stringify(data, null, 2) : `Created ${packet.readiness} review packet: ${reviewPath}`);
 }
 
@@ -503,10 +544,15 @@ export function runFinalize(repoRoot: string, args: string[]): void {
   const reviewContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, REVIEW_PACKET_FILENAME));
   if (reviewContent === null) throw new Error(`No review packet found for ${runId}; run \`feature-inventor review ${runId}\` first`);
   const proposal = loadProposalForRun(repoRoot, runId);
+  const runtimeResultContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUNTIME_RESULT_FILENAME));
+  if (runtimeResultContent === null) throw new Error(`No runtime result found for ${runId}; capture the completed task result before finalizing`);
+  const runtimeResult = parseRuntimeResultFile(runtimeResultContent);
+  assertRuntimeResultMatchesProposal(runtimeResult, proposal);
   const packet = parseReviewPacket(reviewContent);
   if (
     packet.runId !== runId ||
     packet.readiness !== "ready-to-finalize" ||
+    packet.runtimeResultCaptured !== true ||
     packet.proposal.baseCommit !== proposal.target.baseCommit ||
     packet.proposal.manifestHash !== proposal.manifestHash ||
     packet.proposal.policyHash !== proposal.policyHash

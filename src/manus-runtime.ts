@@ -1,4 +1,5 @@
 import type { RunProposal } from "./run-proposal.js";
+import { buildRuntimeResultStructuredOutputSchema } from "./runtime-result.js";
 
 const MANUS_TASK_CREATE_URL = "https://api.manus.ai/v2/task.create";
 
@@ -106,7 +107,7 @@ export function buildManusRunPrompt(request: ManusRunTaskRequest): string {
         ? `You may push ONLY the dedicated review branch after successful independent verification. Never push, merge, or rewrite main/master, and never create a release.`
         : `Do NOT run git push, gh pr create, gh pr merge, or any other remote-mutating command. Leave all commits local to the isolated worktree and report the branch name plus a patch/diff summary.`
     }\n` +
-    `8. End with a concise report containing: run ID, approved base commit, actual checked-out commit, worktree path, branch name, candidate outcome, tests run and actual results, commits/reverts, verification findings, remote effects, and any blockers.\n\n` +
+    `8. End with a concise report that states every field required by the Runtime Result Manifest: run ID, approved base commit, actual checked-out commit, worktree path, branch name, candidate outcome and summary, commit SHA or null, each verification command with passed/failed/not-run outcome and factual summary, patch summary, remote pushed boolean, review URL or null, and blockers. The API will extract this manifest after task completion; do not omit fields or substitute a newer base commit.\n\n` +
     `Safety constraints: do not ask for broad permissions; do not spend time on unrelated backlog work; do not treat passing unrelated tests as meaningful coverage.`;
 }
 
@@ -128,6 +129,7 @@ export async function createManusRunTask(request: ManusRunTaskRequest): Promise<
     interactive_mode: false,
     share_visibility: "private",
     agent_profile: request.agentProfile ?? "manus-1.6",
+    structured_output_schema: buildRuntimeResultStructuredOutputSchema(),
     message: {
       content: [{ type: "text", text: buildManusRunPrompt(request) }],
       ...(request.githubConnectorId ? { connectors: [request.githubConnectorId] } : {}),

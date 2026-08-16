@@ -4,6 +4,13 @@ const MANUS_TASK_LIST_MESSAGES_URL = "https://api.manus.ai/v2/task.listMessages"
 
 type ManusAgentStatus = "running" | "waiting" | "stopped" | "error" | "unknown";
 
+export interface ManusStructuredOutput {
+  sourceEventId: string | null;
+  success: boolean;
+  value: unknown;
+  error: string | null;
+}
+
 export interface ManusTaskSnapshot {
   taskId: string;
   status: ManusAgentStatus;
@@ -16,6 +23,7 @@ export interface ManusTaskSnapshot {
   waitingDescription: string | null;
   error: string | null;
   assistantReport: string | null;
+  structuredOutput: ManusStructuredOutput | null;
 }
 
 interface ManusApiFailure {
@@ -31,6 +39,7 @@ interface RawTaskEvent {
   status_update?: unknown;
   error_message?: unknown;
   assistant_message?: unknown;
+  structured_output_result?: unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -68,6 +77,24 @@ function latestAssistantReport(messages: unknown[]): string | null {
   return latest && isRecord(latest.assistant_message) ? getString(latest.assistant_message.content) : null;
 }
 
+function latestStructuredOutput(messages: unknown[]): ManusStructuredOutput | null {
+  const events = messages.filter(
+    (message): message is RawTaskEvent =>
+      isRecord(message) && message.type === "structured_output_result" && isRecord(message.structured_output_result),
+  );
+  const latest = [...events].sort((left, right) => Number(left.timestamp ?? 0) - Number(right.timestamp ?? 0)).at(-1);
+  if (!latest || !isRecord(latest.structured_output_result) || typeof latest.structured_output_result.success !== "boolean") return null;
+  const output = latest.structured_output_result;
+  const success = output.success;
+  if (typeof success !== "boolean") return null;
+  return {
+    sourceEventId: getString(latest.id),
+    success,
+    value: output.value,
+    error: output.error === null ? null : getString(output.error),
+  };
+}
+
 function latestError(messages: unknown[]): string | null {
   const errors = messages.filter(
     (message): message is RawTaskEvent => isRecord(message) && message.type === "error_message" && isRecord(message.error_message),
@@ -92,6 +119,7 @@ export function interpretManusTaskMessages(taskId: string, messages: unknown[], 
       waitingDescription: null,
       error: latestError(messages),
       assistantReport: latestAssistantReport(messages),
+      structuredOutput: latestStructuredOutput(messages),
     };
   }
   const update = latest.status_update;
@@ -113,6 +141,7 @@ export function interpretManusTaskMessages(taskId: string, messages: unknown[], 
     waitingDescription: getString(detail.waiting_description),
     error: status === "error" ? latestError(messages) ?? getString(update.description) : latestError(messages),
     assistantReport: latestAssistantReport(messages),
+    structuredOutput: latestStructuredOutput(messages),
   };
 }
 
@@ -139,6 +168,8 @@ export function journalEventFromManusSnapshot(runId: string, snapshot: ManusTask
     waitingDescription: snapshot.waitingDescription,
     error: snapshot.error,
     assistantReport: snapshot.assistantReport,
+    structuredOutputEventId: snapshot.structuredOutput?.sourceEventId ?? null,
+    structuredOutputSuccess: snapshot.structuredOutput?.success ?? null,
   });
 }
 
