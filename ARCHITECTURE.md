@@ -60,8 +60,9 @@ The implementation order is deliberate:
 4. **Foundation complete:** Shared proposal, journal, runtime-result, and evidence gates are enforced for Manus and local Claude Code execution.
 5. Convert any remaining runtime-specific paths, including the historical workflow script, into explicit adapters or retire them from supported execution.
 6. Add risk-aware verification policies and richer review packets from captured artifacts.
-7. Enable explicit scheduling only after bounded-run recovery is reliable.
-8. Support a selected external target repository only after the shared engine is proven.
+7. **Complete boundary:** Retire the legacy daemon that invoked the archived workflow. `schedule handoff` now records an exact proposal-pinned command without scheduling or executing it.
+8. Choose and implement an explicit durable scheduler only after a deployment target, run frequency, and review cadence are selected.
+9. Support a selected external target repository only after the shared engine is proven.
 
 Do not prioritize a dashboard, parallel feature execution, fleet management, or broader autonomy before the earlier controls are complete.
 

@@ -50,6 +50,7 @@ describe("governed run views", () => {
         startedAt: "2026-08-17T12:00:00.000Z",
         finalizedAt: "2026-08-17T12:00:02.000Z",
         reviewReadiness: null,
+        scheduledRuntime: null,
       },
     ]);
   });

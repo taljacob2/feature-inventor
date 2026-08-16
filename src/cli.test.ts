@@ -2,7 +2,18 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getRunPlanData, parseDaemonOptions, printHelp, printRunPlan, printStatus, printVersion, runRecap, runStop } from "./cli.js";
+import {
+  LEGACY_DAEMON_RETIRED_MESSAGE,
+  getRunPlanData,
+  parseDaemonOptions,
+  printHelp,
+  printRunPlan,
+  printStatus,
+  printVersion,
+  runDaemon,
+  runRecap,
+  runStop,
+} from "./cli.js";
 import type { StatusData } from "./cli.js";
 import { STOP_FLAG_FILENAME, parseStopFlag } from "./stop-flag.js";
 import { RECAP_STATE_FILENAME, parseRecapState } from "./recap.js";
@@ -210,8 +221,9 @@ describe("printStatus", () => {
 
     printStatus(dir);
     const textOutput = logSpy.mock.calls.map((call) => call[0]).join("\n");
-    expect(textOutput).toContain("\nDaemon health:");
-    expect(textOutput).not.toContain("\\nDaemon health:");
+    expect(textOutput).toContain("\nLegacy daemon (retired):");
+    expect(textOutput).toContain("Historical daemon log:");
+    expect(textOutput).not.toContain("\\nLegacy daemon (retired):");
     expect(textOutput).toContain("IDLE — latest cycle timed-out at 2026-08-01T12:00:00.000Z");
     expect(textOutput).toContain("Recent distinct cycles (newest first):");
     expect(textOutput).toContain("timed-out at 2026-08-01T12:00:00.000Z — no run summary update");
@@ -711,6 +723,14 @@ describe("printRunPlan", () => {
   });
 });
 
+
+describe("retired daemon execution", () => {
+  it("fails closed before launching the archived nightly workflow", async () => {
+    await expect(runDaemon("/tmp/feature-inventor", { intervalMs: 0, once: true, maxFeatures: 1 })).rejects.toThrow(
+      LEGACY_DAEMON_RETIRED_MESSAGE,
+    );
+  });
+});
 
 describe("parseDaemonOptions", () => {
   it("requires an explicit bounded or repeated execution mode", () => {
