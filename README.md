@@ -1,17 +1,10 @@
 # Feature Inventor
 
-A self-hosted, self-growing project: instead of shipping a fixed product,
-Feature Inventor runs a nightly autonomous loop — research → prioritize →
-implement → sanity-check → commit → update roadmap → re-evaluate — that
-invents features and builds them into *this very repo*, forever.
+Feature Inventor is a **governed autonomous improvement harness for one repository at a time**. It turns an operator-approved goal and backlog into a bounded, evidence-backed review candidate: research → prioritize → implement → verify → document → review.
 
-There's no "finished" version. The roadmap (`ROADMAP.md`) is designed to
-regenerate its own horizon every time it gets close to empty, so the backlog
-never visibly runs dry.
+Feature Inventor itself is the reference target used to dogfood the harness. Its self-improving loop is useful evidence, not a reason to let an agent run forever or autonomously ship changes. Every normal run is bounded, isolated, and reviewable; automation never merges to a default branch, deploys, or releases by itself.
 
-For the full model — why it's built this way, the harness-not-dark-factory
-safety stance, and what "delightful" means for this project — see
-`VISION.md`. Background research the design draws on lives in `RESEARCH.md`.
+For the product boundary, runtime architecture, and remediation sequence, see [`ARCHITECTURE.md`](ARCHITECTURE.md). `VISION.md` explains the harness-not-dark-factory safety stance, while `RESEARCH.md` records the background research behind the design.
 
 ## Quickstart
 
@@ -22,12 +15,15 @@ npm install
 npm run build
 ```
 
-Then check on the project — no extra setup needed:
+Then validate the target and check on the project:
 
 ```sh
+node dist/cli.js doctor
 node dist/cli.js status
-# or: npm start -- status
+# or: npm start -- doctor
 ```
+
+`doctor` is non-mutating. It validates the target manifest, Git root and origin, current branch, workspace state, declared checks, and the manual scheduling default before any governed run begins.
 
 ### Installing the `feature-inventor` command globally (optional)
 
@@ -87,6 +83,27 @@ feature-inventor status
 - Whether a graceful stop is currently pending (see below).
 
 Add `--json` for machine-readable output (same data, no section headers).
+
+### Governing a target repository
+
+`feature-inventor.target.json` is the operator-owned contract for the repository. It records repository identity, product goals, required checks, protected paths, review boundaries, and scheduling preference.
+
+```json
+{
+  "schemaVersion": 1,
+  "repository": {
+    "url": "https://github.com/example/project.git",
+    "defaultBranch": "main"
+  },
+  "goals": ["Improve release reliability"],
+  "requiredChecks": ["npm test", "npm run build"],
+  "protectedPaths": [".github/workflows/**"],
+  "reviewPolicy": { "maxFilesChanged": 12, "humanApprovalRequired": true },
+  "schedule": { "mode": "manual" }
+}
+```
+
+Run `feature-inventor doctor` before planning or launching a run. Unknown manifest fields are reported as warnings rather than silently ignored. Manifest creation will move to `feature-inventor init` in the next remediation batch; until then, copy the documented shape above and adapt it for the target repository.
 
 ### Portable run planning (runtime-neutral foundation)
 
@@ -207,21 +224,21 @@ program and only the `Workflow` tool can actually execute
 (optionally passing `maxFeatures`/`branchName`/`repoRoot`), not the only way
 to do it.
 
-### Running unattended for extended periods
+### Running a bounded daemon cycle
 
-**Running this starts real, ongoing work immediately — it does not ask for
-confirmation first.** The moment you run `feature-inventor daemon`, it
-spawns a real headless Claude Code session, and by default spawns another
-one back-to-back the instant each one finishes — indefinitely, until you
-stop it (Ctrl+C) or it errors. A single run is ~20+ minutes and real API
-cost (tonight's first real run: ~892K tokens, 27 agents) — treat starting
-this as switching on an ongoing cost commitment, not running a one-off
-command. See `--max-budget-usd` below if you want a hard ceiling on that
-before you turn it on.
+A daemon cycle is **not** started implicitly. Use one bounded cycle for normal operation:
 
 ```sh
-feature-inventor daemon --yolo
+feature-inventor daemon --once --max-features 1 --yolo
 ```
+
+Repeated execution is an explicit scheduling choice. It requires a cadence, a timeout, and a feature cap:
+
+```sh
+feature-inventor daemon --every 24h --timeout 2h --max-features 1 --yolo
+```
+
+A repeated run remains a significant trust decision because `--yolo` bypasses permission prompts for the spawned Claude Code session. Start with one bounded, reviewable cycle and enable repetition only after the target has passed `doctor` and the resulting review packets are consistently useful.
 
 **Auth**: if you're already logged in on this machine (check with
 `claude auth status`), that's enough — the same login carries through to the
@@ -243,14 +260,14 @@ Scheduler (no OS-specific setup needed) and not Claude Code's `CronCreate`
 (which is session-only, gone if that session ends, and auto-expires after 7
 days — not a fit for "runs for months").
 
-It also means commits land on the `nightly` branch far faster than most
-people can review line-by-line; that's fine (nothing reaches
-`main`/`master` without a human merging — see `VISION.md`'s
-harness-not-dark-factory section), but plan to review in batches rather
-than per-commit.
+The legacy Claude daemon remains a transitional execution path. It now
+requires an explicit bounded mode, but it does not yet create a runner-owned
+worktree. Do not run it from a checkout that is being edited interactively;
+use the Manus path for an isolated task workspace until the shared adapter
+migration is complete. Nothing reaches `main`/`master` without a human merge.
 
-- `--every DURATION` — opt into a slower, fixed cadence instead of
-  continuous churn (e.g. `12h`, `1d`). Omit this for the continuous default.
+- `--once` — run one bounded cycle, which is the required safe mode when no schedule is intended.
+- `--every DURATION` — enable repeated execution at an explicit fixed cadence (for example, `12h` or `1d`). It requires both `--timeout` and `--max-features`.
 - `--yolo` (or `--unattended`) — bypasses Claude Code's permission prompts
   for the spawned runs (`--dangerously-skip-permissions` under the hood).
   This is a real trust decision — the spawned session can read/write files
@@ -258,16 +275,16 @@ than per-commit.
   for this project's explicitly autonomous premise, but worth knowing what
   it actually does rather than just treating it as a fun flag name.
 - `--max-budget-usd AMOUNT` — optional, **off by default**: a hard per-run
-  spending cap passed through to the spawned `claude` invocation. With
-  continuous churn as the default and no cap, cost is bounded only by how
-  long you leave the daemon running — worth turning this on if that matters
-  to you.
-- `--once` — run at most one cycle then exit, useful for testing.
+  spending cap passed through to the spawned `claude` invocation. It is an
+  additional guard for an explicitly scheduled run, not a substitute for the
+  required cadence, timeout, and feature cap.
+- `--max-features COUNT` — bound how many features the spawned workflow may ship in each cycle. It defaults to one for `--once` and is required for `--every`.
 
-**Known limitation**: this process itself has to keep running for the
-schedule to fire at all — unlike an OS scheduler, a reboot or a killed
-process silently ends things until you start it again. Registering
-auto-start-on-boot is planned but not built yet (see `ROADMAP.md`).
+**Known limitations**: this process itself has to keep running for the
+schedule to fire at all, and the legacy Claude daemon has not yet been moved
+to a runner-created worktree. A reboot, a killed process, or concurrent
+interactive editing therefore requires operator attention. The shared
+run-journal and isolated-workspace migration is tracked in `ARCHITECTURE.md`.
 
 Run the test suite and type-check the same way the loop does:
 

@@ -116,17 +116,16 @@ Design notes worth knowing before touching this:
 - **`--yolo`/`--unattended` passes `--dangerously-skip-permissions`** to the
   spawned `claude` invocation — bypasses every permission check for that
   run. Real, documented, opt-in; don't make it the default.
-- **Default `intervalMs` is `0` — continuous churn, on purpose.** `isRunDue`
-  treats `0` as always-due, so with no `--every` flag the next run starts as
-  soon as the previous one's `.feature-inventor-last-run.json` update lands.
-  `--every DURATION` opts into a slower cadence. `checkMs`'s idle-poll sleep
-  only applies when a cycle found *nothing* due — it never adds latency
-  between two back-to-back continuous-churn runs (see `runDaemon`'s loop).
+- **Daemon execution mode is explicit and bounded.** `feature-inventor daemon`
+  requires either `--once` or `--every DURATION`. The one-shot mode defaults
+  to one feature. Repeated mode requires `--timeout` and `--max-features`, so
+  a cadence cannot quietly become an unlimited run. `checkMs` only applies
+  between scheduled cycles that are not yet due.
+
 - **`--max-budget-usd` is optional, off by default, and only added to the
   spawn args when set** (it requires `--print`, per `claude --help`, which
-  is otherwise not passed — the default `claude --bg` invocation without
-  `--print` is the combination actually exercised against the real binary
-  so far; `--bg` + `--print` together isn't separately verified).
+  is otherwise not passed). It is an additional cap for an explicitly bounded
+  cycle, not a substitute for the required timeout and feature limit.
 - **Testing this live is genuinely risky, not just inconvenient.** Trying to
   intercept the `claude` binary via a `PATH` override to test with a fake
   stand-in failed twice while building this (Windows resolves `claude`
@@ -155,6 +154,12 @@ Check the matching `ROADMAP.md` item off `[x]` with a one-line pointer to
 the `CHANGELOG.md` entry rather than repeating the story in both places.
 
 ## Safety boundary
+
+Read `ARCHITECTURE.md` before changing execution paths. The legacy Claude
+runtime is transitional: it now requires bounded modes but does not yet own
+workspace isolation. New work should move policy, lifecycle, evidence, and
+workspace controls into shared core modules rather than expanding runtime-
+specific prompt logic.
 
 The loop commits to a disposable `nightly` branch and never pushes to a
 remote or touches `main`/`master` on its own — see `VISION.md`'s

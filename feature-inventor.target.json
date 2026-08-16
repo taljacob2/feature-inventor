@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "repository": {
+    "url": "https://github.com/taljacob2/feature-inventor.git",
+    "defaultBranch": "master"
+  },
+  "goals": [
+    "Make autonomous improvement runs bounded, reproducible, and evidence-backed",
+    "Make one-repository operation understandable before adding broader automation"
+  ],
+  "requiredChecks": ["npm test", "npm run build"],
+  "protectedPaths": [".github/workflows/**", "infra/**"],
+  "reviewPolicy": {
+    "maxFilesChanged": 12,
+    "humanApprovalRequired": true
+  },
+  "schedule": { "mode": "manual" }
+}
