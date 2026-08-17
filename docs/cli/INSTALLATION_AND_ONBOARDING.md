@@ -39,7 +39,7 @@ From the root of the repository you want to govern, run:
 feature-inventor init
 ```
 
-In an interactive terminal, the command detects Git origin and branch values when available, asks for the remaining operator-owned settings, writes `feature-inventor.target.json`, and prints the next safe steps. It never starts an agent, changes source code, creates a proposal, or schedules background work.
+In an interactive terminal, the command detects Git origin and branch values when available, asks for the remaining operator-owned settings, writes `feature-inventor.target.json`, and prints the next safe steps. It also creates a minimal `ROADMAP.md` only when one is absent, and in a Git checkout it locally ignores generated `.feature-inventor/` artifacts through Git metadata rather than editing the tracked `.gitignore`. It never starts an agent, changes application source code, creates a proposal, or schedules background work.
 
 The initial manifest uses intentionally conservative defaults:
 
@@ -50,11 +50,15 @@ The initial manifest uses intentionally conservative defaults:
 | Protected paths | Empty | The operator must deliberately declare protected scope. |
 | Required checks | One explicit command supplied by the operator | The tool does not guess a repository’s validation command. |
 | Indexing | Enabled locally; automatic preparation disabled | Context is available without silently attaching or executing work. |
+| Roadmap | Empty `ROADMAP.md` scaffold when absent | Planning has a visible operator-owned queue without inventing a candidate. |
+| Generated artifacts | Local `.feature-inventor/` Git exclude when available | Commit-pinned snapshots do not make a target checkout appear dirty. |
 
 After initialization, run:
 
 ```sh
 feature-inventor doctor
+feature-inventor docs validate
+# Add one reviewed item under ROADMAP.md > Now or Next.
 feature-inventor overview
 feature-inventor plan
 ```
@@ -72,17 +76,17 @@ feature-inventor init --non-interactive \
   --format json
 ```
 
-The command rejects missing values, duplicate options, unknown options, and any attempt to overwrite an existing manifest without `--force`. JSON initialization requires `--non-interactive`, ensuring prompts can never contaminate a machine-readable stream.
+The command rejects missing values, duplicate options, unknown options, and any attempt to overwrite an existing manifest without `--force`. It never overwrites an existing `ROADMAP.md`, including when `--force` replaces the manifest. JSON initialization requires `--non-interactive`, ensuring prompts can never contaminate a machine-readable stream.
 
 ## Operator Controls
 
 Use `--no-indexing` to initialize a manifest without the optional local indexing policy. Use `--max-files COUNT` to establish the initial review-change cap. Use `--force` only after inspecting an existing manifest and intentionally deciding to replace it.
 
-> `init` writes configuration only. It does not authorize a run. A proposal must still be created explicitly, validated, and reviewed through the governed lifecycle.
+> `init` writes a target contract and, only when absent, an empty operator roadmap. It does not authorize a run. A proposal must still be created explicitly, validated, and reviewed through the governed lifecycle.
 
 ## Public npm Release Boundary
 
-The package now has a public executable declaration, Node engine requirement, repository metadata, restricted package files, a runtime TypeScript compiler dependency, and a portable `prepack` build. A public registry release is intentionally deferred until the maintainer chooses a license, changes the npm privacy setting deliberately, verifies package ownership, and establishes release/versioning policy.
+The package has an MIT license, public npm metadata, restricted package files, a runtime TypeScript compiler dependency, reproducible artifact validation, and a manually protected OIDC publication workflow. The first registry version remains deliberately unpublished until the maintainer performs the separately confirmed one-time release bootstrap.
 
 At that point, the intended user-facing installation command is:
 

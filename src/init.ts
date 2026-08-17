@@ -11,6 +11,8 @@ import {
 
 const execFile = promisify(execFileCallback);
 const GENERATED_ARTIFACT_DIRECTORY = ".feature-inventor/";
+export const ROADMAP_FILENAME = "ROADMAP.md";
+const INITIAL_ROADMAP_TEMPLATE = `# Roadmap\n\nThis operator-owned queue is the only source of planning candidates. Add explicit, reviewable work under **Now** or **Next** before creating a proposal.\n\n## Now\n\n<!-- Add the most important currently approved candidate here. -->\n\n## Next\n\n<!-- Add a later approved candidate here. -->\n\n## Later\n\n## Horizon\n`;
 
 export const DEFAULT_INIT_MAX_FILES_CHANGED = 10;
 export const DEFAULT_INIT_INDEXING = {
@@ -43,6 +45,8 @@ export interface InitializeTargetResult {
   manifest: TargetManifest;
   created: boolean;
   overwritten: boolean;
+  roadmapPath: string;
+  roadmapCreated: boolean;
 }
 
 function requiredValue(value: string, label: string): string {
@@ -108,6 +112,14 @@ function ensureGeneratedArtifactsAreLocallyIgnored(repoRoot: string): void {
   writeFileSync(excludePath, `${existing}${separator}# Local Feature Inventor generated artifacts\n${GENERATED_ARTIFACT_DIRECTORY}\n`, "utf8");
 }
 
+/** Writes a minimal operator-owned candidate queue only when the target has not supplied one. */
+function ensureRoadmapScaffold(repoRoot: string): { path: string; created: boolean } {
+  const roadmapPath = join(repoRoot, ROADMAP_FILENAME);
+  if (existsSync(roadmapPath)) return { path: roadmapPath, created: false };
+  writeFileSync(roadmapPath, INITIAL_ROADMAP_TEMPLATE, "utf8");
+  return { path: roadmapPath, created: true };
+}
+
 /** Writes one local target contract without silently replacing an existing operator-owned manifest. */
 export function initializeTargetManifest(input: InitializeTargetInput): InitializeTargetResult {
   const manifestPath = join(input.repoRoot, TARGET_MANIFEST_FILENAME);
@@ -119,7 +131,8 @@ export function initializeTargetManifest(input: InitializeTargetInput): Initiali
   const manifest = createInitialTargetManifest(input);
   writeFileSync(manifestPath, serializeTargetManifest(manifest), "utf8");
   ensureGeneratedArtifactsAreLocallyIgnored(input.repoRoot);
-  return { manifestPath, manifest, created: !exists, overwritten: exists };
+  const roadmap = ensureRoadmapScaffold(input.repoRoot);
+  return { manifestPath, manifest, created: !exists, overwritten: exists, roadmapPath: roadmap.path, roadmapCreated: roadmap.created };
 }
 
 async function gitValue(repoRoot: string, args: string[]): Promise<string | null> {
