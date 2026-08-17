@@ -181,6 +181,8 @@ For an asynchronous provider, add `observe`. Translate provider status into the 
 
 The observation method is a read operation. If a provider reports an action awaiting human confirmation, return `waiting` or `awaiting-review`. Never approve it programmatically.
 
+The Manus adapter is the reference asynchronous implementation. Its `observe` method performs one read-only task-status request, translates the provider event into a normalized `RuntimeObservation`, and preserves the provider source event ID. `GovernedRunService` converts that observation into the journal event, so the adapter itself cannot finalize a run or write a duplicate lifecycle transition. A future asynchronous adapter should follow this shape.
+
 ## Conformance requirements
 
 Add provider tests and extend the shared conformance suite. A new adapter is acceptable only when all of the following are demonstrated.

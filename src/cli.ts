@@ -19,7 +19,7 @@ import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
 import { RUN_CONFIG_FILENAME, parseRunConfig } from "./run-config.js";
 import { buildRunPlan, formatRunPlan, type RunPlanData } from "./run-plan.js";
 import { createManusRunTask, type ManusAgentProfile } from "./manus-runtime.js";
-import { launchGovernedRun } from "./core/governed-run-service.js";
+import { launchGovernedRun, observeGovernedRun } from "./core/governed-run-service.js";
 import { createBuiltInRuntimeRegistry } from "./runtimes/builtins.js";
 import {
   SCHEDULE_HANDOFF_FILENAME,
@@ -460,24 +460,41 @@ export async function runWatch(repoRoot: string, args: string[], mode: "watch" |
   const journalContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME));
   if (journalContent === null) throw new Error(`No journal found for ${runId}`);
   const events = parseRunJournalEvents(journalContent);
+  const proposal = loadProposalForRun(repoRoot, runId);
+  const created = [...events].reverse().find((event) => event.type === "task-created");
   const taskId = taskIdFromJournal(events);
-  if (taskId === null) throw new Error(`Run ${runId} has no recorded Manus task; launch it with \`feature-inventor manus run --run ${runId}\``);
-
-  const snapshot = await getManusTaskSnapshot(process.env.MANUS_API_KEY ?? "", taskId);
-  const candidate = journalEventFromManusSnapshot(runId, snapshot);
+  if (taskId === null) throw new Error(`Run ${runId} has no recorded external runtime handle; launch it through \`feature-inventor run --runtime ID --run ${runId}\``);
+  const runtimeId = typeof created?.payload.runtime === "string" ? created.payload.runtime : "manus";
+  const adapter = createBuiltInRuntimeRegistry().get(runtimeId);
+  const { observation, update } = await observeGovernedRun({
+    adapter,
+    repoRoot,
+    proposal,
+    handle: {
+      runtimeId,
+      kind: "external-task",
+      id: taskId,
+      taskUrl: typeof created?.payload.taskUrl === "string" ? created.payload.taskUrl : undefined,
+      metadata: {},
+    },
+    options: { apiKey: process.env.MANUS_API_KEY ?? "" },
+  });
+  const candidate = update === null ? null : createRunJournalEvent(runId, update.type, observation.observedAt, update.payload);
   let appended = false;
-  if (candidate !== null && !journalAlreadyContainsSourceEvent(events, snapshot.sourceEventId)) {
+  if (candidate !== null && !journalAlreadyContainsSourceEvent(events, observation.sourceEventId)) {
     assertLegalRunTransition(events, candidate);
     writeFileSync(journalPath, appendRunJournalEvents(journalContent, [candidate]), "utf8");
     appended = true;
   }
 
-  const data = { runId, mode, snapshot, journalEventAppended: appended };
+  const data = { runId, mode, runtimeId, observation, journalEventAppended: appended };
   if (args.includes("--json")) {
     console.log(JSON.stringify(data, null, 2));
     return;
   }
-  console.log(formatManusSnapshot(snapshot));
+  console.log(`Runtime: ${runtimeId}`);
+  console.log(`State: ${observation.state}`);
+  if (observation.message) console.log(`Detail: ${observation.message}`);
   console.log(appended ? `Recorded ${candidate?.type} in ${journalPath}` : "No new journal event was recorded.");
 }
 

@@ -112,3 +112,26 @@ export async function launchGovernedRun(request: GovernedLaunchRequest): Promise
 export function normalizeObservation(observation: RuntimeObservation): LifecycleUpdate | null {
   return updateForObservation(observation);
 }
+
+export interface GovernedObservationRequest {
+  adapter: RuntimeAdapter;
+  repoRoot: string;
+  proposal: RunProposal;
+  handle: RunHandle;
+  options?: Record<string, unknown>;
+}
+
+/** Performs one passive provider observation and returns a normalized lifecycle update. */
+export async function observeGovernedRun(request: GovernedObservationRequest): Promise<{ observation: RuntimeObservation; update: LifecycleUpdate | null }> {
+  if (request.handle.runtimeId !== request.adapter.id) {
+    throw new Error(`Run handle runtime ${request.handle.runtimeId} does not match adapter ${request.adapter.id}`);
+  }
+  if (!request.adapter.observe) throw new Error(`Runtime ${request.adapter.id} does not support passive observation`);
+  const observation = await request.adapter.observe({
+    repoRoot: request.repoRoot,
+    proposal: request.proposal,
+    handle: request.handle,
+    options: request.options ?? {},
+  });
+  return { observation, update: updateForObservation(observation) };
+}
