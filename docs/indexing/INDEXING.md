@@ -38,7 +38,7 @@ Validation checks the YAML structure, duplicate identifiers, supported risk tags
 
 ## Generated Snapshot Contract
 
-Generated snapshots are local because they are derived artifacts. A later `feature-inventor index build` command will create snapshots with this layout:
+Generated snapshots are local because they are derived artifacts. `feature-inventor index build` creates a snapshot only from a **clean checkout** at its exact current commit. The command records that commit's timestamp rather than the wall clock, so rebuilding an unchanged checkout produces stable artifacts.
 
 ```text
 .feature-inventor/index/
@@ -47,18 +47,16 @@ Generated snapshots are local because they are derived artifacts. A later `featu
       metadata.json
       inventory.json
       graph.json
-      features.json
-      flows.json
+      history.json
       heatmaps.json
       report.md
-      context/
-        <context-pack-id>.json
-        <context-pack-id>.md
 ```
+
+`inventory.json` classifies repository files while excluding generated, dependency, build, and Git directories. `graph.json` contains source-derived TypeScript exports and import, re-export, and dynamic-import relationships. Relative NodeNext `.js` specifiers resolve back to indexed TypeScript source files when that file exists. Package imports and unresolved relative modules remain visible as external edges rather than fabricated internal relationships. `history.json` aggregates Git activity in the configured window, anchored to the indexed commit timestamp. `heatmaps.json` preserves raw structural, historical, and test-linkage values. `report.md` is a human-readable summary of the same local data.
 
 Every `metadata.json` file must record the index schema version, generator version, target commit, generation time, configuration digest, and source-collection coverage. A snapshot is valid only for the commit and configuration it records.
 
-`feature-inventor index status` is non-mutating. It reports whether the generated snapshot is fresh, stale, dirty, incomplete, disabled, or not initialized. The foundation may report `not-initialized` until `index build` is implemented. This is expected and must never be treated as a runtime error or a reason to bypass direct source inspection.
+`feature-inventor index status` is non-mutating. It reports whether the generated snapshot is fresh, stale, dirty, incomplete, disabled, or not initialized. `feature-inventor index report` prints the report from the newest matching or prior-commit local snapshot and surfaces its status. Neither command modifies artifacts.
 
 | State | Meaning | How it may be used |
 |---|---|---|
@@ -75,14 +73,14 @@ Feature Inventor will expose separate lenses instead of a single ambiguous “ho
 
 | Lens | Evidence source | What it shows | What it does not show |
 |---|---|---|---|
-| Entry reachability | Declared entry points and source graph | A module’s connection to known commands, APIs, workflows, or runtime boundaries. | Actual production execution frequency. |
-| Dependency centrality | Direct and bounded transitive imports | Potential change-impact concentration. | Product importance or correctness. |
-| Historical churn | Git commits, changed lines, and change dates within a stated window | Development activity and maintenance concentration. | User demand or runtime use. |
-| Test linkage | Curated registry plus conventional test relationships | Where direct tests are known. | Line, branch, or behavioral coverage. |
+| Entry reachability | Curated feature-registry entry points | Whether a module is an explicitly declared product entry point. | A complete call graph or actual production execution frequency. |
+| Dependency centrality | Resolved direct TypeScript imports, re-exports, and dynamic imports | Direct relationship concentration through fan-in plus fan-out. | Product importance, correctness, or transitive impact. |
+| Historical churn | Git commits and changed lines before the indexed commit within the configured window | Development activity and maintenance concentration. | User demand or runtime use. |
+| Test linkage | Direct resolved imports from indexed TypeScript test files | Where direct module-level test relationships are known. | Line, branch, or behavioral coverage. |
 | Governed-run observation | Run journals and structured results, when explicitly enabled | Evidence from Feature Inventor governed executions. | Target application user behavior. |
 | Runtime telemetry | Explicit opt-in target application telemetry, if ever added | Actual execution frequency in the configured environment. | A default collection mechanism. |
 
-The first generated heatmap must expose raw values and the selected lens. It must not combine signals into a default composite rank and must not describe Git churn or dependency centrality as “common use.”
+Heatmap queries require an explicit lens and expose raw values. Use `feature-inventor index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT]`; there is no composite default rank. Do not describe Git churn or dependency centrality as “common use.”
 
 ## Context Packs
 
@@ -121,6 +119,6 @@ The optional `indexing` section in `feature-inventor.target.json` governs this c
 
 The index implementation should remain free, local, and rebuildable using the repository checkout, Git, Node.js, and language tooling. It must not require a hosted vector database, a paid external indexing service, or an LLM for baseline operation.
 
-When a change introduces a new product capability, command path, runtime boundary, or materially different flow, update `INDEX.md` and `features.yml` in the same pull request. When a source reference is renamed or removed, run `feature-inventor docs validate` before review. Generated snapshot changes should normally stay local and must never mask failing curated-reference validation.
+When a change introduces a new product capability, command path, runtime boundary, or materially different flow, update `INDEX.md` and `features.yml` in the same pull request. When a source reference is renamed or removed, run `feature-inventor docs validate` before review. Run `feature-inventor index build` only from a clean checkout; generated snapshot changes stay local and must never mask failing curated-reference validation.
 
 See the root [INDEX.md](../../INDEX.md) for a concise orientation map and [ARCHITECTURE.md](../../ARCHITECTURE.md) for the broader operating model.
