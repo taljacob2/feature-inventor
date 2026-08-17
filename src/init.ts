@@ -1,6 +1,6 @@
-import { execFile as execFileCallback } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFile as execFileCallback, execFileSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   TARGET_MANIFEST_FILENAME,
@@ -10,6 +10,7 @@ import {
 } from "./target-manifest.js";
 
 const execFile = promisify(execFileCallback);
+const GENERATED_ARTIFACT_DIRECTORY = ".feature-inventor/";
 
 export const DEFAULT_INIT_MAX_FILES_CHANGED = 10;
 export const DEFAULT_INIT_INDEXING = {
@@ -81,6 +82,32 @@ export function createInitialTargetManifest(input: Omit<InitializeTargetInput, "
   return parseTargetManifest(serializeTargetManifest(manifest)).manifest;
 }
 
+/**
+ * Keeps generated local evidence out of Git status without modifying a target's
+ * tracked .gitignore. Git worktrees use their resolved local exclude path.
+ */
+function ensureGeneratedArtifactsAreLocallyIgnored(repoRoot: string): void {
+  let excludePath: string;
+  try {
+    const gitPath = execFileSync("git", ["-C", repoRoot, "rev-parse", "--git-path", "info/exclude"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (gitPath === "") return;
+    excludePath = isAbsolute(gitPath) ? gitPath : resolve(repoRoot, gitPath);
+  } catch {
+    // Initialization remains useful outside a Git checkout; clean-checkout
+    // enforcement simply becomes available once the operator uses Git.
+    return;
+  }
+
+  const existing = existsSync(excludePath) ? readFileSync(excludePath, "utf8") : "";
+  const entries = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
+  if (entries.has(".feature-inventor") || entries.has(GENERATED_ARTIFACT_DIRECTORY)) return;
+  const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
+  writeFileSync(excludePath, `${existing}${separator}# Local Feature Inventor generated artifacts\n${GENERATED_ARTIFACT_DIRECTORY}\n`, "utf8");
+}
+
 /** Writes one local target contract without silently replacing an existing operator-owned manifest. */
 export function initializeTargetManifest(input: InitializeTargetInput): InitializeTargetResult {
   const manifestPath = join(input.repoRoot, TARGET_MANIFEST_FILENAME);
@@ -91,6 +118,7 @@ export function initializeTargetManifest(input: InitializeTargetInput): Initiali
 
   const manifest = createInitialTargetManifest(input);
   writeFileSync(manifestPath, serializeTargetManifest(manifest), "utf8");
+  ensureGeneratedArtifactsAreLocallyIgnored(input.repoRoot);
   return { manifestPath, manifest, created: !exists, overwritten: exists };
 }
 
