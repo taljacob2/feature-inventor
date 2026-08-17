@@ -44,6 +44,19 @@ feature-inventor propose --non-interactive
 
 `--format human|json|plain` selects presentation; `--json` is its compatibility shorthand. `--color auto|always|never` and `--motion auto|reduce|off` configure optional human-facing terminal presentation without polluting JSON. See [`docs/cli/COMMAND_INTERFACE.md`](docs/cli/COMMAND_INTERFACE.md) for the command-interface contract and compatibility policy.
 
+### Shell completion
+
+Feature Inventor can print a reviewable completion script for Bash, Zsh, Fish, or PowerShell. It does not install the script or change a shell profile:
+
+```sh
+feature-inventor completion bash
+feature-inventor completion zsh
+feature-inventor completion fish
+feature-inventor completion powershell
+```
+
+For a temporary Bash session, run `source <(feature-inventor completion bash)`. See [`docs/cli/INSTALLATION_AND_ONBOARDING.md`](docs/cli/INSTALLATION_AND_ONBOARDING.md) for persistent installation choices for each shell.
+
 ### Installing the `feature-inventor` command globally for development (optional)
 
 Everything in this doc works without this step — `node dist/cli.js <command>`

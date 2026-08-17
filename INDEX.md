@@ -41,7 +41,7 @@ The curated registry contains the machine-validated version of these flow defini
 
 | Area | Responsibility | Primary paths |
 |---|---|---|
-| CLI and operator workflow | Parses commands, provides guided and scriptable initialization, exposes stable human/JSON/plain presentation controls, and routes non-mutating inspection, governed proposal, execution, and review operations. | `src/cli.ts`, `src/cli/init.ts`, `src/init.ts`, `src/cli/terminal.ts`, `src/cli/help.ts`, [command guide](docs/cli/COMMAND_INTERFACE.md), [installation guide](docs/cli/INSTALLATION_AND_ONBOARDING.md) |
+| CLI and operator workflow | Parses commands, provides guided and scriptable initialization, generates shell completions from one shared command vocabulary, exposes stable human/JSON/plain presentation controls, and routes non-mutating inspection, governed proposal, execution, and review operations. | `src/cli.ts`, `src/cli/init.ts`, `src/init.ts`, `src/cli/command-spec.ts`, `src/cli/completion.ts`, `src/cli/terminal.ts`, `src/cli/help.ts`, [command guide](docs/cli/COMMAND_INTERFACE.md), [installation guide](docs/cli/INSTALLATION_AND_ONBOARDING.md) |
 | Governance artifacts | Defines immutable proposals, append-only journals, structured results, and review packets. | `src/run-proposal.ts`, `src/run-journal.ts`, `src/runtime-result.ts`, `src/review-packet.ts` |
 | Runtime integration | Resolves registered providers and normalizes preflight, launch, and optional observation. | `src/runtimes/`, `src/core/governed-run-service.ts` |
 | Target contract | Validates the repository identity, operator goals, checks, protected paths, review policy, schedule, and index policy. | `src/target-manifest.ts`, `feature-inventor.target.json` |

@@ -105,7 +105,7 @@ describe("init command contract", () => {
 
     expect(result.mode).toBe("guided");
     expect(existsSync(join(root, "feature-inventor.target.json"))).toBe(true);
-    expect(formatInitResult(result)).toContain("No runtime has been started.");
+    expect(formatInitResult(result)).toContain("No runtime, proposal, source change, or schedule has been created.");
   });
 
   it("requires all policy-defining values in non-interactive mode", async () => {

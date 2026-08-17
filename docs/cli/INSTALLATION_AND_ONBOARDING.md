@@ -91,3 +91,29 @@ npm install -g feature-inventor
 ```
 
 Native executables and a full-screen terminal UI are later distribution layers. They must preserve this Node/npm path and the scriptable non-interactive CLI as supported first-class interfaces.
+
+## Shell Completion
+
+Feature Inventor can print completion scripts for Bash, Zsh, Fish, and PowerShell:
+
+```sh
+feature-inventor completion bash
+feature-inventor completion zsh
+feature-inventor completion fish
+feature-inventor completion powershell
+```
+
+The command only writes the script to standard output. It does not inspect, modify, or source a shell profile. Review the generated script before making it persistent.
+
+| Shell | Test for the current session | Typical persistent installation |
+|---|---|---|
+| Bash | `source <(feature-inventor completion bash)` | Save the output in your distribution’s Bash completion directory, such as `~/.local/share/bash-completion/completions/feature-inventor`, then open a new shell. |
+| Zsh | `source <(feature-inventor completion zsh)` | Save the output as `_feature-inventor` in a directory on `fpath`, then run `autoload -U compinit && compinit` in your Zsh configuration. |
+| Fish | `feature-inventor completion fish | source` | Save the output as `~/.config/fish/completions/feature-inventor.fish`; Fish loads this location automatically. |
+| PowerShell | `$script = feature-inventor completion powershell; Invoke-Expression $script` | Save the output to a reviewed script file and dot-source it from your PowerShell profile if you choose to load it automatically. |
+
+Completion scripts suggest commands, subcommands, global options, and selected command-specific options. They do not submit forms, create proposals, start runtimes, or alter target repositories.
+
+## Guided Setup Polish
+
+Guided `init` now labels each question with its governance purpose. The confirmation states what was written and explicitly confirms that no runtime, proposal, source change, or schedule was created. The non-interactive path remains unchanged and is the supported route for CI, scripts, and machine-readable JSON output.
