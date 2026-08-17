@@ -7,7 +7,7 @@ import { buildHistoricalActivity } from "./git-history.js";
 import { buildHeatmaps, rowsForHeatmapLens } from "./heatmaps.js";
 import { createIndexConfigDigest, indexSnapshotDirectory } from "./index-status.js";
 import { buildRepositoryInventory } from "./inventory.js";
-import { buildTypeScriptModuleGraph } from "./typescript-graph.js";
+import { buildSourceModuleGraph } from "./typescript-graph.js";
 import {
   INDEX_SCHEMA_VERSION,
   type HeatmapLens,
@@ -80,7 +80,7 @@ function formatIndexReport(report: IndexReport): string {
     "## Graph and History",
     "",
     markdownTable([
-      ["TypeScript modules", String(report.graph.nodes)],
+      ["Indexed source modules", String(report.graph.nodes)],
       ["Module relationships", String(report.graph.edges)],
       ["External or unresolved relationships", String(report.graph.unresolvedEdges)],
       ["Git commits scanned", String(report.history.commitsScanned)],
@@ -137,7 +137,7 @@ export async function buildIndexSnapshot(
     buildHistoricalActivity(repoRoot, targetCommit, config.historyDays),
   ]);
   const inventory = buildRepositoryInventory(repoRoot, targetCommit);
-  const graph = buildTypeScriptModuleGraph(repoRoot, targetCommit, inventory.files);
+  const graph = buildSourceModuleGraph(repoRoot, targetCommit, inventory.files);
   const heatmaps = buildHeatmaps(graph, history, validation.registry);
   const metadata: IndexSnapshotMetadata = {
     schemaVersion: INDEX_SCHEMA_VERSION,

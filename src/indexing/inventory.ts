@@ -21,6 +21,8 @@ function languageForPath(path: string): string | null {
     case ".mjs":
     case ".cjs":
       return "javascript";
+    case ".svelte":
+      return "svelte";
     case ".json":
       return "json";
     case ".yaml":
@@ -41,7 +43,7 @@ function languageForPath(path: string): string | null {
 function classifyPath(path: string): RepositoryFileKind {
   const filename = path.split("/").at(-1) ?? path;
   if (/\.(test|spec)\.[cm]?[jt]sx?$/i.test(filename)) return "test";
-  if (/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i.test(filename)) return "source";
+  if (/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|svelte)$/i.test(filename)) return "source";
   if (/\.(md|mdx)$/i.test(filename)) return "documentation";
   if (
     /\.(json|ya?ml|toml|ini|config\.[cm]?[jt]s)$/i.test(filename) ||

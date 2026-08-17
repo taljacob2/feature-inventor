@@ -81,6 +81,27 @@ describe("inventory, TypeScript graph, and heatmap lenses", () => {
     );
   });
 
+  it("indexes JavaScript and Svelte script modules without interpreting Svelte markup", () => {
+    const directory = createFixture();
+    writeFileSync(join(directory, "src", "helper.js"), "export const helper = () => 'ok';\n", "utf8");
+    writeFileSync(join(directory, "src", "Widget.svelte"), "<script>\n  import { helper } from './helper.js';\n  export let label;\n  const value = helper();\n</script>\n<p>{label} {value}</p>\n", "utf8");
+    writeFileSync(join(directory, "src", "app.js"), "import Widget from './Widget.svelte';\nexport { Widget };\n", "utf8");
+
+    const inventory = buildRepositoryInventory(directory, COMMIT);
+    const graph = buildTypeScriptModuleGraph(directory, COMMIT, inventory.files);
+
+    expect(inventory.files.find((file) => file.path === "src/Widget.svelte")).toMatchObject({ kind: "source", language: "svelte" });
+    expect(graph.language).toBe("mixed");
+    expect(graph.nodes.find((node) => node.path === "src/app.js")).toMatchObject({ language: "javascript", exports: ["Widget"] });
+    expect(graph.nodes.find((node) => node.path === "src/Widget.svelte")).toMatchObject({ language: "svelte", exports: ["label"] });
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: "src/app.js", target: "src/Widget.svelte", specifier: "./Widget.svelte", external: false }),
+        expect.objectContaining({ source: "src/Widget.svelte", target: "src/helper.js", specifier: "./helper.js", external: false }),
+      ]),
+    );
+  });
+
   it("keeps centrality, churn, and test linkage separate while exposing raw evidence", () => {
     const directory = createFixture();
     const inventory = buildRepositoryInventory(directory, COMMIT);
