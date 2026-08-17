@@ -59,6 +59,21 @@ describe("feature registry", () => {
     expect(validation.diagnostics).toEqual([]);
   });
 
+  it("allows an explicit empty test list when a repository has no automated test anchors", () => {
+    const testlessRegistry = VALID_REGISTRY.replace("    tests:\n      - src/service.test.ts", "    tests: []");
+
+    const validation = validateFeatureRegistry(createFixture(), testlessRegistry);
+
+    expect(validation.valid).toBe(true);
+    expect(validation.registry?.features[0]?.tests).toEqual([]);
+  });
+
+  it("continues to require the tests field even when its list may be empty", () => {
+    expect(() => parseFeatureRegistry(VALID_REGISTRY.replace("    tests:\n      - src/service.test.ts\n", ""))).toThrow(
+      "features[0].tests must be an array",
+    );
+  });
+
   it("reports missing symbol anchors and unknown feature flow references", () => {
     const invalid = VALID_REGISTRY
       .replace("src/service.ts#performWork", "src/service.ts#missingWork")

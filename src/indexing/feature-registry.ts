@@ -39,9 +39,9 @@ function requireString(value: unknown, path: string): string {
   return value;
 }
 
-function requireStringArray(value: unknown, path: string): string[] {
-  if (!Array.isArray(value) || value.length === 0 || value.some((entry) => typeof entry !== "string" || entry.trim() === "")) {
-    throw new Error(`${path} must be a non-empty array of non-empty strings`);
+function requireStringArray(value: unknown, path: string, allowEmpty = false): string[] {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0) || value.some((entry) => typeof entry !== "string" || entry.trim() === "")) {
+    throw new Error(`${path} must be ${allowEmpty ? "an array" : "a non-empty array"} of non-empty strings`);
   }
   return [...value];
 }
@@ -69,7 +69,9 @@ function parseFeature(value: unknown, path: string): IndexedFeature {
     intent: requireString(feature.intent, `${path}.intent`),
     entryPoints: requireStringArray(feature.entryPoints, `${path}.entryPoints`),
     primaryPaths: requireStringArray(feature.primaryPaths, `${path}.primaryPaths`),
-    tests: requireStringArray(feature.tests, `${path}.tests`),
+    // A curated feature may truthfully have no automated-test anchors yet.
+    // Require the field but allow an empty list rather than fabricating coverage.
+    tests: requireStringArray(feature.tests, `${path}.tests`, true),
     flows: requireStringArray(feature.flows, `${path}.flows`),
     riskTags: requireStringArray(feature.riskTags, `${path}.riskTags`),
   };
