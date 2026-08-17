@@ -20,7 +20,7 @@ describe("npm distribution contract", () => {
     expect(packageJson.private).toBe(true);
     expect(packageJson.bin["feature-inventor"]).toBe("dist/cli.js");
     expect(packageJson.engines.node).toBe(">=22");
-    expect(packageJson.files).toEqual(expect.arrayContaining(["dist", "README.md", "docs/cli"]));
+    expect(packageJson.files).toEqual(expect.arrayContaining(["dist", "README.md", "RELEASING.md", "docs/cli"]));
     expect(packageJson.scripts.clean).toContain("scripts/clean-dist.mjs");
     expect(packageJson.scripts.prepack).toBe("npm run build");
     expect(packageJson.dependencies.typescript).toBeDefined();

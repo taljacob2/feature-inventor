@@ -10,6 +10,7 @@ This file is the short entry point for developers and execution runtimes. It doe
 |---|---|
 | Understand the product model and operating sequence | [README.md](README.md), then [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Install and initialize a target repository | [docs/cli/INSTALLATION_AND_ONBOARDING.md](docs/cli/INSTALLATION_AND_ONBOARDING.md), then `feature-inventor init` |
+| Prepare or verify a controlled release artifact | [RELEASING.md](RELEASING.md), then `npm run release:dry-run` |
 | Orient a new operator without starting work | `feature-inventor overview`, then [docs/cli/COMMAND_INTERFACE.md](docs/cli/COMMAND_INTERFACE.md) |
 | Check a target repository before governed work | `feature-inventor doctor` and [src/doctor.ts](src/doctor.ts) |
 | See the operator-owned target contract | [feature-inventor.target.json](feature-inventor.target.json) and [src/target-manifest.ts](src/target-manifest.ts) |

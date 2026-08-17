@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- A validation-only release foundation that builds a reproducible npm tarball, checksum, and provenance record without publishing to npm, GitHub Packages, or any registry.
+
 Append-only log of what actually shipped — whether built by the automated
 nightly loop running unattended, or hand-built in a human-directed session.
 Every entry is traceable to a git commit and tagged so the two stay visibly

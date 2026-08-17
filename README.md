@@ -4,7 +4,7 @@ Feature Inventor is a **governed autonomous improvement harness for one reposito
 
 Feature Inventor itself is the reference target used to dogfood the harness. Its self-improving loop is useful evidence, not a reason to let an agent run forever or autonomously ship changes. Every normal run is bounded, isolated, and reviewable; automation never merges to a default branch, deploys, or releases by itself.
 
-For the product boundary, runtime architecture, and remediation sequence, see [`ARCHITECTURE.md`](ARCHITECTURE.md). `VISION.md` explains the harness-not-dark-factory safety stance, while `RESEARCH.md` records the background research behind the design.
+For the product boundary, runtime architecture, and remediation sequence, see [`ARCHITECTURE.md`](ARCHITECTURE.md). `VISION.md` explains the harness-not-dark-factory safety stance, while `RESEARCH.md` records the background research behind the design. [`RELEASING.md`](RELEASING.md) defines the validation-only artifact process and the explicit gates before any package publication.
 
 ## Quickstart
 
@@ -69,7 +69,7 @@ npm link
 
 This symlinks `feature-inventor` on your PATH to this repo's `dist/cli.js`.
 
-> A public `npm install -g feature-inventor` release is intentionally not available yet. The project now verifies that its restricted production tarball installs and runs correctly, but publication awaits an explicit license, package-ownership, versioning, and release-policy decision.
+> A public `npm install -g feature-inventor` release is intentionally not available yet. The project can create a reproducible, checksummed npm tarball for private review, but publication awaits an explicit license, package-ownership, versioning, and release-policy decision. See [`RELEASING.md`](RELEASING.md) for the controlled artifact workflow and integrity checks.
 Because it's a symlink to this repo — not a copy — **upgrading later is just
 rebuilding, not reinstalling**:
 

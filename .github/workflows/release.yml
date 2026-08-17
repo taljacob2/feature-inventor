@@ -1,0 +1,130 @@
+name: Prepare release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact package version already prepared in package.json and CHANGELOG.md, for example 0.1.9
+        required: true
+        type: string
+      tag:
+        description: New release tag that must equal v followed by the version, for example v0.1.9
+        required: true
+        type: string
+      create_draft_release:
+        description: Create a GitHub draft release with the validated artifacts. Registry publication remains disabled.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-artifacts:
+    name: Validate and prepare artifacts
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.artifact-name.outputs.value }}
+    steps:
+      - name: Check out selected source revision
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Confirm release tag is new
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}"; then
+            echo "Release tag ${RELEASE_TAG} already exists." >&2
+            exit 1
+          fi
+
+      - name: Build and test
+        run: |
+          npm run build
+          npm test
+
+      - name: Validate release metadata and package content
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: npm run release:validate -- --release "$RELEASE_VERSION" --tag "$RELEASE_TAG"
+
+      - name: Build checksummed release artifacts
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: npm run release:artifacts -- --release "$RELEASE_VERSION" --tag "$RELEASE_TAG" --output release-artifacts
+
+      - name: Verify checksum manifest
+        working-directory: release-artifacts
+        run: sha256sum --check checksums.txt
+
+      - name: Define artifact name
+        id: artifact-name
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: echo "value=feature-inventor-${RELEASE_VERSION}-release-artifacts" >> "$GITHUB_OUTPUT"
+
+      - name: Upload validated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: feature-inventor-${{ inputs.version }}-release-artifacts
+          if-no-files-found: error
+          path: |
+            release-artifacts/*.tgz
+            release-artifacts/checksums.txt
+            release-artifacts/provenance.json
+
+  create-draft-release:
+    name: Create draft GitHub release
+    needs: prepare-artifacts
+    if: inputs.create_draft_release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download validated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare-artifacts.outputs.artifact_name }}
+          path: release-artifacts
+
+      - name: Verify downloaded checksum manifest
+        working-directory: release-artifacts
+        run: sha256sum --check checksums.txt
+
+      - name: Create draft release from the validated source revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          TARGET_COMMIT: ${{ github.sha }}
+        run: |
+          cat > release-notes.md <<EOF
+          ## Feature Inventor ${RELEASE_VERSION}
+
+          This is a draft release created only from validated artifacts.
+
+          - Source commit: \\`${TARGET_COMMIT}\\`
+          - Package registries: not published
+          - Integrity: verify the attached tarball against \\`checksums.txt\\`
+          - Provenance: inspect the attached \\`provenance.json\\`
+          EOF
+          gh release create "$RELEASE_TAG" release-artifacts/*.tgz release-artifacts/checksums.txt release-artifacts/provenance.json \
+            --target "$TARGET_COMMIT" \
+            --draft \
+            --title "Feature Inventor $RELEASE_VERSION" \
+            --notes-file release-notes.md
