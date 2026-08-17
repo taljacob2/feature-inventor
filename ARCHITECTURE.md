@@ -25,7 +25,7 @@ A target repository supplies a `feature-inventor.target.json` manifest. The mani
 init -> doctor -> plan -> propose -> run -> watch -> review
 ```
 
-`init` will establish the manifest. `doctor` validates the environment and policy. `docs validate` verifies the committed repository map and source-linked feature registry. `index status` reports generated-snapshot freshness without building or modifying artifacts. `plan` remains a read-only queue preview. `propose` currently resolves the configured default branch to a commit, saves an immutable proposal, and records the first journal event. `run` will execute one governed proposal through a selected runtime adapter. `watch` will show durable run state and required human decisions. `review` will render an evidence-backed review packet.
+`init` will establish the manifest. `overview` is the official orientation command and summarizes the local queue, governed runs, and one next safe action without starting a runtime. `doctor` validates the environment and policy. `docs validate` verifies the committed repository map and source-linked feature registry. `index status` reports generated-snapshot freshness without building or modifying artifacts. `plan` remains a read-only queue preview. `propose` currently resolves the configured default branch to a commit, saves an immutable proposal, and records the first journal event. `run` will execute one governed proposal through a selected runtime adapter. `watch` will show durable run state and required human decisions. `review` will render an evidence-backed review packet. `status` remains a compatibility alias for its legacy detailed presenter.
 
 ## Repository intelligence and bounded context
 
@@ -69,11 +69,12 @@ The implementation order is deliberate:
 3. **Foundation complete:** Add commit-pinned proposals and an append-only run journal.
 4. **Foundation complete:** Shared proposal, journal, runtime-result, and evidence gates are enforced for Manus and local Claude Code execution.
 5. **Foundation complete:** Add the committed repository map, source-linked feature registry, indexing policy, validation command, and non-mutating snapshot status. The deterministic builder produces local file inventory, TypeScript graph, Git history, separate heatmap lenses, a report, and token-budgeted context packs. Governed proposals may retain matching persisted pack provenance without treating it as source or verification evidence.
-6. Convert any remaining runtime-specific paths, including the historical workflow script, into explicit adapters or retire them from supported execution.
-7. **Foundation complete:** Add risk-aware verification policies based on explicit curated risk tags, protected paths, and operator-configured check mappings. The derived decision is immutable proposal and review metadata; richer captured-artifact interpretation remains future work.
-8. **Complete boundary:** Retire the legacy daemon that invoked the archived workflow. `schedule handoff` now records an exact proposal-pinned command without scheduling or executing it.
-9. **Deferred by product decision:** Keep scheduler handoffs non-executing until there is an explicit need to start approved work on a timetable. Automatic local index preparation now addresses faster context without introducing background execution, a persistent host, or a schedule.
-10. Support a selected external target repository only after the shared engine is proven.
+6. **Foundation complete:** Establish an official cross-platform command foundation: grouped help, focused command help, a testable global routing layer, `overview`, `--cwd`, explicit output modes, and capability-aware color/motion boundaries. Existing commands and JSON contracts remain compatible. A full-screen TUI remains explicitly deferred until packaging, completions, non-interactive behavior, and cross-platform acceptance coverage are stable.
+7. Convert any remaining runtime-specific paths, including the historical workflow script, into explicit adapters or retire them from supported execution.
+8. **Foundation complete:** Add risk-aware verification policies based on explicit curated risk tags, protected paths, and operator-configured check mappings. The derived decision is immutable proposal and review metadata; richer captured-artifact interpretation remains future work.
+9. **Complete boundary:** Retire the legacy daemon that invoked the archived workflow. `schedule handoff` now records an exact proposal-pinned command without scheduling or executing it.
+10. **Deferred by product decision:** Keep scheduler handoffs non-executing until there is an explicit need to start approved work on a timetable. Automatic local index preparation now addresses faster context without introducing background execution, a persistent host, or a schedule.
+11. Support a selected external target repository only after the shared engine is proven.
 
 Do not prioritize a dashboard, parallel feature execution, fleet management, or broader autonomy before the earlier controls are complete.
 

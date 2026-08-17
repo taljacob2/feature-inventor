@@ -9,6 +9,7 @@ This file is the short entry point for developers and execution runtimes. It doe
 | Need | Start here |
 |---|---|
 | Understand the product model and operating sequence | [README.md](README.md), then [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Orient a new operator without starting work | `feature-inventor overview`, then [docs/cli/COMMAND_INTERFACE.md](docs/cli/COMMAND_INTERFACE.md) |
 | Check a target repository before governed work | `feature-inventor doctor` and [src/doctor.ts](src/doctor.ts) |
 | See the operator-owned target contract | [feature-inventor.target.json](feature-inventor.target.json) and [src/target-manifest.ts](src/target-manifest.ts) |
 | Find a named product capability | [docs/indexing/features.yml](docs/indexing/features.yml) |
@@ -39,7 +40,7 @@ The curated registry contains the machine-validated version of these flow defini
 
 | Area | Responsibility | Primary paths |
 |---|---|---|
-| CLI and operator workflow | Parses commands and exposes non-mutating inspection, governed proposal, execution, and review operations. | `src/cli.ts`, `README.md` |
+| CLI and operator workflow | Parses commands, exposes stable human/JSON/plain presentation controls, and routes non-mutating inspection, governed proposal, execution, and review operations. | `src/cli.ts`, `src/cli/terminal.ts`, `src/cli/help.ts`, [command guide](docs/cli/COMMAND_INTERFACE.md) |
 | Governance artifacts | Defines immutable proposals, append-only journals, structured results, and review packets. | `src/run-proposal.ts`, `src/run-journal.ts`, `src/runtime-result.ts`, `src/review-packet.ts` |
 | Runtime integration | Resolves registered providers and normalizes preflight, launch, and optional observation. | `src/runtimes/`, `src/core/governed-run-service.ts` |
 | Target contract | Validates the repository identity, operator goals, checks, protected paths, review policy, schedule, and index policy. | `src/target-manifest.ts`, `feature-inventor.target.json` |
@@ -54,6 +55,7 @@ The curated registry contains the machine-validated version of these flow defini
 | New product capability | `docs/indexing/features.yml` | Every declared path, symbol, test, and flow reference must pass `docs validate`. |
 | New language extractor | The indexing extractor contract under `src/indexing/` | Generated snapshots must be deterministic, commit-pinned, and explicit about incomplete coverage. |
 | Durable scheduling | Proposal-pinned schedule handoff | A handoff records an exact command but does not start a scheduler or execute a run itself. |
+| Optional terminal UI | Command-foundation presentation contract | A full-screen TUI is deferred until package distribution, completion, non-interactive behavior, and cross-platform acceptance coverage are stable. |
 
 ## Indexing Status
 

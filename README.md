@@ -15,15 +15,29 @@ npm install
 npm run build
 ```
 
-Then validate the target and check on the project:
+Then validate the target and orient yourself in the project:
 
 ```sh
 node dist/cli.js doctor
-node dist/cli.js status
-# or: npm start -- doctor
+node dist/cli.js overview
+# or: npm start -- overview
 ```
 
-`doctor` is non-mutating. It validates the target manifest, Git root and origin, current branch, workspace state, declared checks, and the manual scheduling default before any governed run begins.
+`overview` is the official orientation command. It summarizes the current queue, recent governed runs, and the next safe action. It does not create a proposal or start a runtime. `doctor` is also non-mutating. It validates the target manifest, Git root and origin, current branch, workspace state, declared checks, and the manual scheduling default before any governed run begins.
+
+Run `feature-inventor help` for grouped examples, or `feature-inventor help propose` for focused guidance. The older `status` command remains available as a compatibility alias.
+
+### Output, terminal, and repository controls
+
+Every modernized command accepts the global controls below. They work on Linux, macOS, and Windows because they are parsed by Feature Inventor rather than a shell-specific wrapper.
+
+```sh
+feature-inventor overview --format json
+feature-inventor doctor --cwd ../another-repository --format plain
+feature-inventor propose --non-interactive
+```
+
+`--format human|json|plain` selects presentation; `--json` is its compatibility shorthand. `--color auto|always|never` and `--motion auto|reduce|off` configure optional human-facing terminal presentation without polluting JSON. See [`docs/cli/COMMAND_INTERFACE.md`](docs/cli/COMMAND_INTERFACE.md) for the command-interface contract and compatibility policy.
 
 ### Installing the `feature-inventor` command globally (optional)
 
