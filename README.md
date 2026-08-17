@@ -24,13 +24,14 @@ Then initialize the target repository you want to govern. Run this from that tar
 feature-inventor init
 feature-inventor doctor
 feature-inventor overview
+feature-inventor tui # optional interactive dashboard
 ```
 
 `init` writes an explicit local target contract, creates an empty operator roadmap only when absent, and prints the next safe steps. It does not start a runtime, create a proposal, change target application source, or schedule background work. For a fully scriptable setup, use `feature-inventor init --non-interactive --repository URL --default-branch BRANCH --goal TEXT --check COMMAND --format json`.
 
-`overview` is the official orientation command. It summarizes the current queue, recent governed runs, and the next safe action. It does not create a proposal or start a runtime. `doctor` is also non-mutating. It validates the target manifest, Git root and origin, current branch, workspace state, declared checks, and the manual scheduling default before any governed run begins.
+`overview` is the official scriptable orientation command. It summarizes the current queue, recent governed runs, and the next safe action. It does not create a proposal or start a runtime. `tui` is an optional keyboard-first dashboard for interactive human terminals; it provides the same orientation state, requires typed confirmation for local index or proposal actions, and keeps runtime execution in the explicit CLI workflow. See the [full-screen TUI guide](docs/cli/FULL_SCREEN_TUI.md) for controls and boundaries. `doctor` is also non-mutating. It validates the target manifest, Git root and origin, current branch, workspace state, declared checks, and the manual scheduling default before any governed run begins.
 
-Run `feature-inventor help` for grouped examples, `feature-inventor help propose` for proposal guidance, or `feature-inventor help approve` for the enforced reviewer gate. The older `status` command remains available as a compatibility alias.
+Run `feature-inventor help` for grouped examples, `feature-inventor help propose` for proposal guidance, `feature-inventor help approve` for the enforced reviewer gate, or `feature-inventor help tui` for the dashboard contract. The older `status` command remains available as a compatibility alias.
 
 ### Output, terminal, and repository controls
 

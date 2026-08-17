@@ -110,6 +110,28 @@ features:
       - lifecycle-state
       - external-runtime
 
+  - id: full-screen-tui
+    name: Full-screen terminal dashboard
+    intent: Provide an optional keyboard-first governed-work dashboard while preserving explicit CLI authorization for high-impact actions.
+    entryPoints:
+      - src/cli.ts#runTui
+    primaryPaths:
+      - src/tui/session.ts
+      - src/tui/render.ts
+      - src/tui/types.ts
+      - src/cli/terminal.ts
+      - src/cli/command-spec.ts
+    tests:
+      - src/tui/render.test.ts
+      - src/cli/cli-foundation.test.ts
+      - src/cli/terminal.test.ts
+    flows:
+      - full-screen-tui
+    riskTags:
+      - governance-policy
+      - lifecycle-state
+      - non-executing-handoff
+
   - id: schedule-handoff
     name: Proposal-pinned scheduler handoff
     intent: Produce a reviewable command handoff for one approved proposal without starting a scheduler or executing a run.
@@ -204,6 +226,20 @@ flows:
         role: built-in-registration
       - source: src/core/governed-run-service.ts
         role: shared-governed-orchestration
+
+  - id: full-screen-tui
+    name: Full-screen terminal dashboard
+    startsAt:
+      - src/cli.ts#runTui
+    steps:
+      - source: src/cli.ts#runTui
+        role: command-bridge
+      - source: src/tui/session.ts#launchTui
+        role: terminal-session-control
+      - source: src/tui/render.ts#renderTuiFrame
+        role: read-only-presentation
+      - source: src/cli.ts#getStatusData
+        role: shared-governance-state
 
   - id: schedule-handoff
     name: Proposal-pinned scheduler handoff
