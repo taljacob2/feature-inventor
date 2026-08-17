@@ -71,8 +71,8 @@ export function prepareReleaseVersion({ argv = process.argv.slice(2) } = {}) {
   const changelogPath = resolve(repositoryRoot, "CHANGELOG.md");
   const changelog = readFileSync(changelogPath, "utf8");
 
-  if (packageJson.private !== true) {
-    fail('package.json must remain "private": true while this release foundation is validation-only.');
+  if (packageJson.private !== false || packageJson.license !== "MIT" || packageJson.publishConfig?.access !== "public") {
+    fail("package.json must satisfy the approved MIT public npm policy before preparing a release version.");
   }
   if (!SEMVER_PATTERN.test(packageJson.version)) {
     fail(`current package version ${JSON.stringify(packageJson.version)} must use release semantic version format X.Y.Z.`);

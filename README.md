@@ -4,11 +4,11 @@ Feature Inventor is a **governed autonomous improvement harness for one reposito
 
 Feature Inventor itself is the reference target used to dogfood the harness. Its self-improving loop is useful evidence, not a reason to let an agent run forever or autonomously ship changes. Every normal run is bounded, isolated, and reviewable; automation never merges to a default branch, deploys, or releases by itself.
 
-For the product boundary, runtime architecture, and remediation sequence, see [`ARCHITECTURE.md`](ARCHITECTURE.md). `VISION.md` explains the harness-not-dark-factory safety stance, while `RESEARCH.md` records the background research behind the design. [`RELEASING.md`](RELEASING.md) defines the validation-only artifact process and the explicit gates before any package publication.
+For the product boundary, runtime architecture, and remediation sequence, see [`ARCHITECTURE.md`](ARCHITECTURE.md). `VISION.md` explains the harness-not-dark-factory safety stance, while `RESEARCH.md` records the background research behind the design. [`RELEASING.md`](RELEASING.md) defines the public npm policy, release controls, and separate first-publication gate.
 
 ## Quickstart
 
-Feature Inventor requires Node 22 or later. The repository is package-ready but remains intentionally private in npm metadata until release ownership and licensing are explicitly decided. Install it from source today:
+Feature Inventor requires Node 22 or later. The project now has an approved MIT public-npm identity, but no package version has been published yet. Install it from source until the first release is announced:
 
 ```sh
 git clone https://github.com/taljacob2/feature-inventor.git
@@ -69,7 +69,7 @@ npm link
 
 This symlinks `feature-inventor` on your PATH to this repo's `dist/cli.js`.
 
-> A public `npm install -g feature-inventor` release is intentionally not available yet. The project can create a reproducible, checksummed npm tarball for private review, but publication awaits an explicit license, package-ownership, versioning, and release-policy decision. See [`RELEASING.md`](RELEASING.md) for the controlled artifact workflow and integrity checks.
+> The public installation command will be `npm install -g feature-inventor` after the first tagged package version is published. That first publication remains intentionally gated by an exact maintainer confirmation, a clean tagged checkout, and interactive npm account authentication. See [`RELEASING.md`](RELEASING.md) for the controlled public-release workflow and integrity checks.
 Because it's a symlink to this repo — not a copy — **upgrading later is just
 rebuilding, not reinstalling**:
 
@@ -441,3 +441,7 @@ half-implementing them — see `ROADMAP.md`).
 Developers adding or maintaining an execution engine should read the [Runtime Adapter Implementation Guide](docs/runtimes/IMPLEMENTING_ADAPTERS.md). It describes the adapter contract, capability model, lifecycle ownership rules, conformance requirements, and a practical workflow for future runtimes such as Codex.
 
 Developers adding a product capability, source flow, or language extractor should start with the [Repository Index](INDEX.md) and [Indexing and Context Retrieval guide](docs/indexing/INDEXING.md). The committed registry is validated with `feature-inventor docs validate`; generated local snapshots remain advisory and commit-pinned.
+
+## License
+
+Feature Inventor is released under the [MIT License](LICENSE). Copyright © 2026 taljacob2.
