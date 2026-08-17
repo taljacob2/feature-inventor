@@ -46,7 +46,8 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
   {
     title: "Govern a proposal and run",
     commands: [
-      ["run", "Launch one proposal through a selected runtime adapter"],
+      ["approve", "Record a human decision that unlocks a protected proposal"],
+      ["run", "Launch one approved proposal through a selected runtime adapter"],
       ["watch|recover", "Observe or recover a governed runtime lifecycle"],
       ["verify|review|finalize", "Record evidence and complete the review lifecycle"],
       ["journal|recap", "Inspect append-only lifecycle evidence and summaries"],
@@ -94,6 +95,15 @@ export const COMMAND_TOPICS: Readonly<Record<string, CommandTopic>> = {
     examples: ["feature-inventor propose", "feature-inventor propose --no-auto-index", "feature-inventor propose --context-pack .feature-inventor/index/v1/COMMIT/context/PACK.json"],
     options: ["--context-pack", "--no-auto-index"],
   },
+  approve: {
+    name: "approve",
+    summary: "Record one reviewer decision bound to an immutable proposal before a protected runtime launch.",
+    usage: "feature-inventor approve RUN_ID --reviewer NAME --note TEXT [--format human|json|plain]",
+    examples: [
+      "feature-inventor approve RUN_ID --reviewer maintainer@example.com --note \"Reviewed scope, risks, and required checks.\"",
+    ],
+    options: ["--reviewer", "--note"],
+  },
   run: {
     name: "run",
     summary: "Launch exactly one approved proposal through a registered runtime adapter.",
@@ -118,7 +128,7 @@ export const COMMAND_TOPICS: Readonly<Record<string, CommandTopic>> = {
 };
 
 export const COMMAND_NAMES = [
-  "init", "overview", "status", "doctor", "docs", "index", "plan", "propose", "journal", "watch", "recover",
+  "init", "overview", "status", "doctor", "docs", "index", "plan", "propose", "approve", "journal", "watch", "recover",
   "capture", "verify", "review", "finalize", "run", "manus", "claude", "schedule", "recap", "stop", "daemon", "completion", "help",
 ] as const;
 
@@ -135,6 +145,7 @@ export const SUBCOMMANDS: Readonly<Record<string, readonly string[]>> = {
 export const COMMAND_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   init: COMMAND_TOPICS.init.options ?? [],
   propose: COMMAND_TOPICS.propose.options ?? [],
+  approve: COMMAND_TOPICS.approve.options ?? [],
   run: COMMAND_TOPICS.run.options ?? [],
   index: ["--by", "--limit", "--feature", "--flow", "--path", "--command", "--pack", "--max-tokens"],
   watch: ["--run"],

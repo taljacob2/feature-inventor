@@ -4,7 +4,7 @@ Feature Inventor is a **governed autonomous improvement harness for one reposito
 
 Feature Inventor itself is the reference target used to dogfood the harness. Its self-improving loop is useful evidence, not a reason to let an agent run forever or autonomously ship changes. Every normal run is bounded, isolated, and reviewable; automation never merges to a default branch, deploys, or releases by itself.
 
-For the product boundary, runtime architecture, and remediation sequence, see [`ARCHITECTURE.md`](ARCHITECTURE.md). `VISION.md` explains the harness-not-dark-factory safety stance, while `RESEARCH.md` records the background research behind the design. [`RELEASING.md`](RELEASING.md) defines the public npm policy, release controls, and separate first-publication gate.
+For the product boundary, runtime architecture, and remediation sequence, see [`ARCHITECTURE.md`](ARCHITECTURE.md). `VISION.md` explains the harness-not-dark-factory safety stance, while `RESEARCH.md` records the background research behind the design. [`RELEASING.md`](RELEASING.md) defines the public npm policy, release controls, and separate first-publication gate. Human reviewers should follow the [Human Review Guide](docs/cli/HUMAN_REVIEW_GUIDE.md) before authorizing a protected run.
 
 ## Quickstart
 
@@ -26,11 +26,11 @@ feature-inventor doctor
 feature-inventor overview
 ```
 
-`init` writes an explicit local target contract and prints the next safe steps. It does not start a runtime, create a proposal, change target source, or schedule background work. For a fully scriptable setup, use `feature-inventor init --non-interactive --repository URL --default-branch BRANCH --goal TEXT --check COMMAND --format json`.
+`init` writes an explicit local target contract, creates an empty operator roadmap only when absent, and prints the next safe steps. It does not start a runtime, create a proposal, change target application source, or schedule background work. For a fully scriptable setup, use `feature-inventor init --non-interactive --repository URL --default-branch BRANCH --goal TEXT --check COMMAND --format json`.
 
 `overview` is the official orientation command. It summarizes the current queue, recent governed runs, and the next safe action. It does not create a proposal or start a runtime. `doctor` is also non-mutating. It validates the target manifest, Git root and origin, current branch, workspace state, declared checks, and the manual scheduling default before any governed run begins.
 
-Run `feature-inventor help` for grouped examples, or `feature-inventor help propose` for focused guidance. The older `status` command remains available as a compatibility alias.
+Run `feature-inventor help` for grouped examples, `feature-inventor help propose` for proposal guidance, or `feature-inventor help approve` for the enforced reviewer gate. The older `status` command remains available as a compatibility alias.
 
 ### Output, terminal, and repository controls
 
@@ -228,6 +228,15 @@ feature-inventor propose --context-pack .feature-inventor/index/v1/COMMIT/contex
 
 `propose` does **not** start an agent. It resolves the configured default branch to a concrete Git commit, stores the full queue and policy with stable hashes, and initializes an append-only journal with a `planned` event. With `--context-pack`, it accepts only a repository-relative persisted JSON artifact from a **fresh** snapshot whose target commit matches the proposal base commit. The proposal records the pack ID, selector, budget, repository-relative artifact paths, policy digest, and SHA-256 content hash. This is **informational design provenance only**: it is not source evidence, verification evidence, execution authorization, or an input to review readiness. Local artifacts are placed under `.feature-inventor/runs/<run-id>/` and are intentionally ignored by Git.
 
+When the proposal’s frozen policy or risk record requires human approval, every supported runtime fails closed until a reviewer writes a matching approval record:
+
+```sh
+feature-inventor journal RUN_ID
+feature-inventor approve RUN_ID --reviewer "your-github-handle" --note "Reviewed scope, risk reasons, and required checks."
+```
+
+See the [Human Review Guide](docs/cli/HUMAN_REVIEW_GUIDE.md) for the required inspection procedure and the distinction between this local gate and a target repository’s pull-request review.
+
 ```sh
 feature-inventor status
 feature-inventor journal RUN_ID
@@ -243,7 +252,8 @@ The `manus run` command executes one selected proposal as a private, asynchronou
 
 ```sh
 feature-inventor propose
-# Note the emitted run ID, then:
+# Review the emitted proposal and record human approval when required:
+feature-inventor approve RUN_ID --reviewer "your-github-handle" --note "Reviewed scope, provider boundaries, and required checks."
 export MANUS_API_KEY='your-api-key'
 feature-inventor manus run --run RUN_ID
 ```
@@ -284,7 +294,8 @@ The `claude run` command is the local, proposal-backed Claude Code adapter. It r
 
 ```sh
 feature-inventor propose
-# Note the emitted run ID, then:
+# Review the emitted proposal and record human approval when required:
+feature-inventor approve RUN_ID --reviewer "your-github-handle" --note "Reviewed scope and verification requirements."
 feature-inventor claude run --run RUN_ID
 ```
 
@@ -365,6 +376,7 @@ New execution begins with an explicit, immutable proposal rather than the histor
 ```sh
 feature-inventor propose
 feature-inventor journal RUN_ID
+feature-inventor approve RUN_ID --reviewer "your-github-handle" --note "Reviewed exact proposal identity and execution policy."
 feature-inventor claude run --run RUN_ID
 # or: feature-inventor manus run --run RUN_ID
 ```

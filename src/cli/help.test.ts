@@ -15,6 +15,9 @@ describe("CLI help", () => {
   it("provides focused help for common commands and a useful unknown-topic fallback", () => {
     expect(formatCommandHelp("propose")).toContain("Create an immutable proposal");
     expect(formatCommandHelp("propose")).toContain("--no-auto-index");
+    expect(formatCommandHelp("approve")).toContain("Record one reviewer decision");
+    expect(formatCommandHelp("approve")).toContain("--reviewer");
+    expect(formatCommandHelp("approve")).toContain("--note");
     expect(formatCommandHelp("index")).toContain("index status|build|report|heatmap|context");
     expect(formatCommandHelp("missing-command")).toBeNull();
     expect(formatUnknownHelpTopic("missing-command")).toContain("Unknown help topic: missing-command");

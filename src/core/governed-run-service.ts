@@ -1,4 +1,5 @@
 import { assertProposalMatchesEnvironment } from "../proposal-execution.js";
+import { assertRunApprovalMatchesProposal, requiresHumanApproval, type RunApproval } from "../run-approval.js";
 import type { RunProposal } from "../run-proposal.js";
 import type { RunEventType } from "../run-journal.js";
 import type {
@@ -19,6 +20,8 @@ export interface GovernedLaunchRequest {
   adapter: RuntimeAdapter;
   repoRoot: string;
   proposal: RunProposal;
+  /** Required when proposal policy or risk policy requires explicit human approval. */
+  approval?: RunApproval;
   environment: RuntimeEnvironment;
   allowRemotePush?: boolean;
   options?: Record<string, unknown>;
@@ -67,6 +70,12 @@ export async function launchGovernedRun(request: GovernedLaunchRequest): Promise
     throw new Error("Could not resolve the local Git origin and configured default-branch commit");
   }
   assertProposalMatchesEnvironment(proposal, { repositoryUrl: environment.repositoryUrl, baseCommit: environment.baseCommit });
+  if (requiresHumanApproval(proposal)) {
+    if (!request.approval) {
+      throw new Error(`Human approval is required before launching ${proposal.runId}; run \`feature-inventor approve ${proposal.runId} --reviewer NAME --note TEXT\` after reviewing the proposal.`);
+    }
+    assertRunApprovalMatchesProposal(request.approval, proposal);
+  }
 
   const context: RuntimeLaunchContext = {
     repoRoot: request.repoRoot,

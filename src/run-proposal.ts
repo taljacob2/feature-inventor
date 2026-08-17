@@ -44,6 +44,8 @@ export interface RunProposal {
   riskVerification?: RiskAwareVerificationDecision;
   manifestHash: string;
   policyHash: string;
+  /** Frozen at proposal creation; launch enforcement must not consult mutable manifest state. */
+  humanApprovalRequired: boolean;
   policy: RunPolicy;
   goals: string[];
   requiredChecks: string[];
@@ -68,6 +70,19 @@ function sha256(value: string): string {
 
 function stableJson(value: unknown): string {
   return JSON.stringify(value);
+}
+
+/** The approval decision must be covered by the same immutable policy identity as runtime execution. */
+function policyIdentity(
+  policy: RunPolicy,
+  humanApprovalRequired: boolean,
+  riskVerification: RiskAwareVerificationDecision | undefined,
+): Record<string, unknown> {
+  return {
+    policy,
+    humanApprovalRequired,
+    riskManualReviewRequired: riskVerification?.manualReviewRequired ?? false,
+  };
 }
 
 export function createRunId(now: Date, baseCommit: string): string {
@@ -163,7 +178,8 @@ export function createRunProposal(input: CreateRunProposalInput): RunProposal {
     testCommands: [...input.plan.policy.testCommands],
   };
   const manifestHash = sha256(stableJson(input.manifest));
-  const policyHash = sha256(stableJson(policy));
+  const humanApprovalRequired = input.manifest.reviewPolicy.humanApprovalRequired;
+  const policyHash = sha256(stableJson(policyIdentity(policy, humanApprovalRequired, input.riskVerification)));
 
   return {
     schemaVersion: 1,
@@ -178,6 +194,7 @@ export function createRunProposal(input: CreateRunProposalInput): RunProposal {
     ...(input.riskVerification ? { riskVerification: structuredClone(input.riskVerification) } : {}),
     manifestHash,
     policyHash,
+    humanApprovalRequired,
     policy,
     goals: [...input.manifest.goals],
     requiredChecks: input.riskVerification ? [...input.riskVerification.requiredChecks] : [...input.manifest.requiredChecks],
@@ -226,9 +243,17 @@ export function parseRunProposal(content: string): RunProposal {
       throw new Error("Invalid run proposal: requiredChecks must match riskVerification.requiredChecks");
     }
   }
+  if (proposal.humanApprovalRequired !== undefined && typeof proposal.humanApprovalRequired !== "boolean") {
+    throw new Error("Invalid run proposal: humanApprovalRequired must be a boolean when present");
+  }
   if (!proposal.policy || !Array.isArray(proposal.policy.testCommands)) throw new Error("Invalid run proposal: policy is required");
+  if (proposal.humanApprovalRequired !== undefined) {
+    const expectedPolicyHash = sha256(stableJson(policyIdentity(proposal.policy, proposal.humanApprovalRequired, proposal.riskVerification)));
+    if (proposal.policyHash !== expectedPolicyHash) throw new Error("Invalid run proposal: policyHash does not match approval policy");
+  }
   if (!Array.isArray(proposal.queue) || !Array.isArray(proposal.notAttempted)) {
     throw new Error("Invalid run proposal: queue and notAttempted are required");
   }
-  return proposal as RunProposal;
+  // Proposals created before explicit approval enforcement retain a safe default.
+  return { ...proposal, humanApprovalRequired: proposal.humanApprovalRequired ?? true } as RunProposal;
 }

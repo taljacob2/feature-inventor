@@ -25,17 +25,20 @@ features:
     name: Governed runtime execution
     intent: Launch an approved proposal through a selected runtime adapter and record the lifecycle as append-only evidence.
     entryPoints:
+      - src/cli.ts#runApprove
       - src/cli.ts#runRuntime
     primaryPaths:
       - src/automatic-proposal-preparation.ts
       - src/core/governed-run-service.ts
       - src/run-proposal.ts
+      - src/run-approval.ts
       - src/run-journal.ts
       - src/runtimes/registry.ts
       - src/runtimes/types.ts
     tests:
       - src/automatic-proposal-preparation.test.ts
       - src/governed-runs.test.ts
+      - src/run-approval.test.ts
       - src/runtimes/registry.test.ts
     flows:
       - governed-run-lifecycle
@@ -140,8 +143,13 @@ flows:
   - id: governed-run-lifecycle
     name: Governed runtime lifecycle
     startsAt:
+      - src/cli.ts#runApprove
       - src/cli.ts#runRuntime
     steps:
+      - source: src/cli.ts#runApprove
+        role: proposal-bound-human-approval
+      - source: src/run-approval.ts
+        role: immutable-approval-validation
       - source: src/cli.ts#runRuntime
         role: command-dispatch
       - source: src/core/governed-run-service.ts#launchGovernedRun
