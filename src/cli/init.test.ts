@@ -1,0 +1,140 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createInitialTargetManifest, initializeTargetManifest } from "../init.js";
+import { parseTargetManifest } from "../target-manifest.js";
+import { runCli } from "../cli.js";
+import { formatInitResult, parseInitCommandOptions, runInitCommand, type InitPrompt } from "./init.js";
+
+const directories: string[] = [];
+
+function createTemporaryRepository(): string {
+  const directory = mkdtempSync(join(tmpdir(), "feature-inventor-init-"));
+  directories.push(directory);
+  return directory;
+}
+
+function promptWith(values: string[]): InitPrompt {
+  const answers = [...values];
+  return {
+    ask: async () => answers.shift() ?? "",
+    close: vi.fn(),
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
+describe("initialization core", () => {
+  it("creates an explicit conservative manifest validated by the ordinary parser", () => {
+    const manifest = createInitialTargetManifest({
+      repositoryUrl: "https://github.com/example/demo.git",
+      defaultBranch: "main",
+      goal: "Make setup clearer",
+      requiredCheck: "npm test",
+    });
+
+    expect(manifest.reviewPolicy.humanApprovalRequired).toBe(true);
+    expect(manifest.schedule.mode).toBe("manual");
+    expect(manifest.indexing?.enabled).toBe(true);
+    expect(parseTargetManifest(JSON.stringify(manifest)).manifest).toEqual(manifest);
+  });
+
+  it("does not overwrite an operator-owned manifest without --force", () => {
+    const root = createTemporaryRepository();
+    initializeTargetManifest({
+      repoRoot: root,
+      repositoryUrl: "https://github.com/example/demo.git",
+      defaultBranch: "main",
+      goal: "Initial goal",
+      requiredCheck: "npm test",
+    });
+
+    expect(() => initializeTargetManifest({
+      repoRoot: root,
+      repositoryUrl: "https://github.com/example/demo.git",
+      defaultBranch: "main",
+      goal: "Replacement goal",
+      requiredCheck: "npm run build",
+    })).toThrow("already exists");
+
+    const result = initializeTargetManifest({
+      repoRoot: root,
+      repositoryUrl: "https://github.com/example/demo.git",
+      defaultBranch: "main",
+      goal: "Replacement goal",
+      requiredCheck: "npm run build",
+      force: true,
+    });
+    expect(result.overwritten).toBe(true);
+    expect(readFileSync(result.manifestPath, "utf8")).toContain("Replacement goal");
+  });
+});
+
+describe("init command contract", () => {
+  it("parses the fully scriptable grammar and rejects unknown options", () => {
+    expect(parseInitCommandOptions([
+      "--repository", "https://github.com/example/demo.git",
+      "--default-branch", "main",
+      "--goal", "Improve onboarding",
+      "--check", "npm test",
+      "--max-files", "8",
+      "--no-indexing",
+      "--force",
+      "--json",
+    ])).toEqual({
+      repositoryUrl: "https://github.com/example/demo.git",
+      defaultBranch: "main",
+      goal: "Improve onboarding",
+      requiredCheck: "npm test",
+      maxFilesChanged: 8,
+      indexingEnabled: false,
+      force: true,
+      json: true,
+    });
+    expect(() => parseInitCommandOptions(["--unknown"])).toThrow("Unknown init option");
+  });
+
+  it("guides a caller through missing values while retaining explicit provided values", async () => {
+    const root = createTemporaryRepository();
+    const prompt = promptWith(["https://github.com/example/demo.git", "main", "Improve setup", "npm test"]);
+    const result = await runInitCommand(root, { force: false, json: false }, false, () => prompt);
+
+    expect(result.mode).toBe("guided");
+    expect(existsSync(join(root, "feature-inventor.target.json"))).toBe(true);
+    expect(formatInitResult(result)).toContain("No runtime has been started.");
+  });
+
+  it("requires all policy-defining values in non-interactive mode", async () => {
+    const root = createTemporaryRepository();
+    await expect(runInitCommand(root, { force: false, json: false }, true)).rejects.toThrow("--repository is required");
+    expect(existsSync(join(root, "feature-inventor.target.json"))).toBe(false);
+  });
+
+  it("routes a non-interactive public CLI invocation without prompts and emits clean JSON", async () => {
+    const root = createTemporaryRepository();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await runCli([
+      "init",
+      "--non-interactive",
+      "--format", "json",
+      "--repository", "https://github.com/example/demo.git",
+      "--default-branch", "main",
+      "--goal", "Improve setup",
+      "--check", "npm test",
+    ], root);
+
+    const output = JSON.parse(String(log.mock.calls[0]![0])) as { mode: string; manifestPath: string };
+    expect(output.mode).toBe("non-interactive");
+    expect(output.manifestPath).toBe(join(root, "feature-inventor.target.json"));
+  });
+
+  it("refuses JSON-guided setup to preserve a clean machine-readable stream", async () => {
+    const root = createTemporaryRepository();
+    await expect(runCli(["init", "--format", "json"], root)).rejects.toThrow("requires --non-interactive");
+  });
+});

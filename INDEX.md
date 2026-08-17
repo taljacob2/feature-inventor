@@ -9,6 +9,7 @@ This file is the short entry point for developers and execution runtimes. It doe
 | Need | Start here |
 |---|---|
 | Understand the product model and operating sequence | [README.md](README.md), then [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Install and initialize a target repository | [docs/cli/INSTALLATION_AND_ONBOARDING.md](docs/cli/INSTALLATION_AND_ONBOARDING.md), then `feature-inventor init` |
 | Orient a new operator without starting work | `feature-inventor overview`, then [docs/cli/COMMAND_INTERFACE.md](docs/cli/COMMAND_INTERFACE.md) |
 | Check a target repository before governed work | `feature-inventor doctor` and [src/doctor.ts](src/doctor.ts) |
 | See the operator-owned target contract | [feature-inventor.target.json](feature-inventor.target.json) and [src/target-manifest.ts](src/target-manifest.ts) |
@@ -26,7 +27,7 @@ This file is the short entry point for developers and execution runtimes. It doe
 
 | Flow | Entry point | Primary implementation | Tests and detailed reference |
 |---|---|---|---|
-| Target contract and preflight | `src/cli.ts#runDoctor` | `src/target-manifest.ts`, `src/doctor.ts` | `src/target-manifest.test.ts`, `src/doctor.test.ts` |
+| Target initialization, contract, and preflight | `src/cli.ts#runCli` | `src/cli/init.ts`, `src/init.ts`, `src/target-manifest.ts`, `src/doctor.ts` | `src/cli/init.test.ts`, `src/target-manifest.test.ts`, `src/doctor.test.ts` |
 | Proposal creation | `src/cli.ts#runPropose` | `src/automatic-proposal-preparation.ts`, `src/run-proposal.ts`, `src/context-pack-provenance.ts`, `src/risk-verification-policy.ts`, `src/run-journal.ts`, `src/run-plan.ts` | `src/automatic-proposal-preparation.test.ts`, `src/run-proposal.test.ts`, `src/risk-verification-policy.test.ts`, `src/proposal-context-provenance.test.ts`, `src/governed-runs.test.ts` |
 | Governed runtime launch | `src/cli.ts#runRuntime` | `src/core/governed-run-service.ts`, `src/runtimes/registry.ts`, `src/runtimes/types.ts` | `src/runtimes/registry.test.ts`, [adapter guide](docs/runtimes/IMPLEMENTING_ADAPTERS.md) |
 | Passive observation and recovery | `src/cli.ts#runWatch` | `src/core/governed-run-service.ts`, `src/runtimes/manus.ts`, `src/run-journal.ts` | `src/runtimes/manus.test.ts`, `src/runtimes/registry.test.ts` |
@@ -40,7 +41,7 @@ The curated registry contains the machine-validated version of these flow defini
 
 | Area | Responsibility | Primary paths |
 |---|---|---|
-| CLI and operator workflow | Parses commands, exposes stable human/JSON/plain presentation controls, and routes non-mutating inspection, governed proposal, execution, and review operations. | `src/cli.ts`, `src/cli/terminal.ts`, `src/cli/help.ts`, [command guide](docs/cli/COMMAND_INTERFACE.md) |
+| CLI and operator workflow | Parses commands, provides guided and scriptable initialization, exposes stable human/JSON/plain presentation controls, and routes non-mutating inspection, governed proposal, execution, and review operations. | `src/cli.ts`, `src/cli/init.ts`, `src/init.ts`, `src/cli/terminal.ts`, `src/cli/help.ts`, [command guide](docs/cli/COMMAND_INTERFACE.md), [installation guide](docs/cli/INSTALLATION_AND_ONBOARDING.md) |
 | Governance artifacts | Defines immutable proposals, append-only journals, structured results, and review packets. | `src/run-proposal.ts`, `src/run-journal.ts`, `src/runtime-result.ts`, `src/review-packet.ts` |
 | Runtime integration | Resolves registered providers and normalizes preflight, launch, and optional observation. | `src/runtimes/`, `src/core/governed-run-service.ts` |
 | Target contract | Validates the repository identity, operator goals, checks, protected paths, review policy, schedule, and index policy. | `src/target-manifest.ts`, `feature-inventor.target.json` |
