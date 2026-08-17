@@ -32,6 +32,9 @@ import {
 import { runClaudeCodeProposal } from "./claude-runtime.js";
 import { buildDoctorData, formatDoctor } from "./doctor.js";
 import { TARGET_MANIFEST_FILENAME, parseTargetManifest } from "./target-manifest.js";
+import { formatRegistryValidation, validateFeatureRegistryFile } from "./indexing/feature-registry.js";
+import { formatIndexStatus, getIndexStatus } from "./indexing/index-status.js";
+import { DEFAULT_INDEXING_CONFIG, INDEX_ROOT_DOCUMENT_PATH } from "./indexing/types.js";
 import {
   RUN_PROPOSAL_FILENAME,
   RUNS_DIRECTORY,
@@ -303,6 +306,55 @@ export async function runDoctor(repoRoot: string, options: { json?: boolean } = 
   });
   console.log(options.json ? JSON.stringify(data, null, 2) : formatDoctor(data));
   if (!data.ready) process.exitCode = 1;
+}
+
+/** Validates committed repository-navigation artifacts without generating or modifying any index snapshot. */
+export function runDocsValidate(repoRoot: string, options: { json?: boolean } = {}): void {
+  const rootIndexPresent = existsSync(join(repoRoot, INDEX_ROOT_DOCUMENT_PATH));
+  const registryValidation = validateFeatureRegistryFile(repoRoot);
+  const diagnostics = [
+    ...(rootIndexPresent ? [] : [{ path: INDEX_ROOT_DOCUMENT_PATH, message: "Repository index document is required" }]),
+    ...registryValidation.diagnostics,
+  ];
+  const data = {
+    valid: rootIndexPresent && registryValidation.valid,
+    rootIndexPresent,
+    registry: registryValidation.registry,
+    diagnostics,
+  };
+  if (options.json) {
+    console.log(JSON.stringify(data, null, 2));
+  } else if (data.valid) {
+    console.log(formatRegistryValidation(registryValidation));
+    console.log(`Repository index document is present: ${INDEX_ROOT_DOCUMENT_PATH}`);
+  } else {
+    console.log("Documentation index is invalid:");
+    for (const diagnostic of diagnostics) console.log(`- ${diagnostic.path}: ${diagnostic.message}`);
+  }
+  if (!data.valid) process.exitCode = 1;
+}
+
+/** Reports local snapshot freshness without generating, repairing, or mutating index artifacts. */
+export async function runIndexStatus(repoRoot: string, options: { json?: boolean } = {}): Promise<void> {
+  const manifestContent = readOptionalFile(repoRoot, TARGET_MANIFEST_FILENAME);
+  if (manifestContent === null) throw new Error(`${TARGET_MANIFEST_FILENAME} is required before checking index status`);
+  const { manifest, warnings: manifestWarnings } = parseTargetManifest(manifestContent);
+  const [targetCommit, porcelain] = await Promise.all([
+    readGitValue(repoRoot, ["rev-parse", "HEAD"]),
+    readGitValue(repoRoot, ["status", "--porcelain"]),
+  ]);
+  const status = getIndexStatus(repoRoot, manifest.indexing ?? DEFAULT_INDEXING_CONFIG, targetCommit, porcelain === null ? null : porcelain === "");
+  const data = { ...status, manifestWarnings };
+  console.log(options.json ? JSON.stringify(data, null, 2) : formatIndexStatus(status));
+  if (status.state === "unavailable") process.exitCode = 1;
+}
+
+/** Dispatches the intentionally small initial index command family. */
+export async function runIndex(repoRoot: string, args: string[]): Promise<void> {
+  if (args[0] !== "status" || args.slice(1).some((arg) => arg !== "--json")) {
+    throw new Error("Usage: feature-inventor index status [--json]");
+  }
+  await runIndexStatus(repoRoot, { json: args.includes("--json") });
 }
 
 /** Saves a commit-pinned proposal and its initial journal event without launching an execution runtime. */
@@ -1413,7 +1465,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | docs validate [--json] | index status [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once | --every DURATION ...] | --help | --version]\n" +
   "  daemon execution is retired and fails closed because it used the archived nightly workflow. " +
   "Use `schedule handoff RUN_ID --runtime claude|manus` to write an exact proposal-pinned handoff instead.\n" +
@@ -1493,6 +1545,15 @@ async function main(): Promise<void> {
       break;
     case "doctor":
       await runDoctor(process.cwd(), { json: rest.includes("--json") });
+      break;
+    case "docs":
+      if (rest[0] !== "validate" || rest.slice(1).some((arg) => arg !== "--json")) {
+        throw new Error("Usage: feature-inventor docs validate [--json]");
+      }
+      runDocsValidate(process.cwd(), { json: rest.includes("--json") });
+      break;
+    case "index":
+      await runIndex(process.cwd(), rest);
       break;
     case "plan":
       printRunPlan(process.cwd(), { json: rest.includes("--json") });
