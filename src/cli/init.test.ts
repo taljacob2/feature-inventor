@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,6 +42,32 @@ describe("initialization core", () => {
     expect(manifest.schedule.mode).toBe("manual");
     expect(manifest.indexing?.enabled).toBe(true);
     expect(parseTargetManifest(JSON.stringify(manifest)).manifest).toEqual(manifest);
+  });
+
+  it("locally ignores generated Feature Inventor artifacts without changing a tracked ignore file", () => {
+    const root = createTemporaryRepository();
+    execFileSync("git", ["init", "--quiet"], { cwd: root });
+
+    initializeTargetManifest({
+      repoRoot: root,
+      repositoryUrl: "https://github.com/example/demo.git",
+      defaultBranch: "main",
+      goal: "Initial goal",
+      requiredCheck: "npm test",
+    });
+    initializeTargetManifest({
+      repoRoot: root,
+      repositoryUrl: "https://github.com/example/demo.git",
+      defaultBranch: "main",
+      goal: "Replacement goal",
+      requiredCheck: "npm run build",
+      force: true,
+    });
+
+    const excludePath = execFileSync("git", ["rev-parse", "--git-path", "info/exclude"], { cwd: root, encoding: "utf8" }).trim();
+    const exclude = readFileSync(join(root, excludePath), "utf8");
+    expect(exclude.match(/^\.feature-inventor\/$/gm)).toHaveLength(1);
+    expect(existsSync(join(root, ".gitignore"))).toBe(false);
   });
 
   it("does not overwrite an operator-owned manifest without --force", () => {
