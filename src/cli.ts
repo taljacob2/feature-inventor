@@ -19,6 +19,8 @@ import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
 import { RUN_CONFIG_FILENAME, parseRunConfig } from "./run-config.js";
 import { buildRunPlan, formatRunPlan, type RunPlanData } from "./run-plan.js";
 import { createManusRunTask, type ManusAgentProfile } from "./manus-runtime.js";
+import { launchGovernedRun } from "./core/governed-run-service.js";
+import { createBuiltInRuntimeRegistry } from "./runtimes/builtins.js";
 import {
   SCHEDULE_HANDOFF_FILENAME,
   assertScheduleHandoffMatchesProposal,
@@ -657,6 +659,50 @@ function parseManusAgentProfile(value: string | undefined): ManusAgentProfile | 
   if (value === undefined) return undefined;
   if (value === "manus-1.6" || value === "manus-1.6-lite" || value === "manus-1.6-max") return value;
   throw new Error("--profile must be manus-1.6, manus-1.6-lite, or manus-1.6-max");
+}
+
+/** Launches one selected proposal through a registered runtime adapter. */
+export async function runRuntime(repoRoot: string, args: string[]): Promise<void> {
+  const runtimeId = optionValue(args, "--runtime");
+  const runId = optionValue(args, "--run");
+  if (!runtimeId) throw new Error("run requires --runtime ADAPTER_ID");
+  if (!runId || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(runId)) throw new Error("run requires --run RUN_ID from `feature-inventor propose`");
+  const proposal = loadProposalForRun(repoRoot, runId);
+  const journalPath = join(repoRoot, RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME);
+  let journalContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME));
+  if (journalContent === null) throw new Error(`No journal found for ${runId}`);
+  let events = parseRunJournalEvents(journalContent);
+  const [repositoryUrl, baseCommit] = await Promise.all([
+    readGitValue(repoRoot, ["remote", "get-url", "origin"]),
+    readGitValue(repoRoot, ["rev-parse", "--verify", `${proposal.target.defaultBranch}^{commit}`]),
+  ]);
+  const registry = createBuiltInRuntimeRegistry();
+  const adapter = registry.get(runtimeId);
+  const launch = await launchGovernedRun({
+    adapter,
+    repoRoot,
+    proposal,
+    environment: { repositoryUrl, baseCommit },
+    allowRemotePush: args.includes("--allow-remote-push"),
+    options: {
+      apiKey: process.env.MANUS_API_KEY,
+      projectId: optionValue(args, "--project"),
+      githubConnectorId: optionValue(args, "--github-connector"),
+      agentProfile: optionValue(args, "--profile"),
+    },
+  });
+  for (const update of launch.updates) {
+    const event = createRunJournalEvent(runId, update.type, new Date().toISOString(), update.payload);
+    assertLegalRunTransition(events, event);
+    journalContent = appendRunJournalEvents(journalContent, [event]);
+    writeFileSync(journalPath, journalContent, "utf8");
+    events = [...events, event];
+  }
+  if (launch.launch.observation?.state === "failed") {
+    throw new Error(launch.launch.observation.message ?? `${adapter.displayName} failed to produce a valid runtime result`);
+  }
+  const data = { runId, runtime: adapter.id, handle: launch.handle, observation: launch.launch.observation, journalPath };
+  console.log(args.includes("--json") ? JSON.stringify(data, null, 2) : `Launched governed ${adapter.displayName} run ${runId}; journal: ${journalPath}`);
 }
 
 /**
@@ -1350,7 +1396,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once | --every DURATION ...] | --help | --version]\n" +
   "  daemon execution is retired and fails closed because it used the archived nightly workflow. " +
   "Use `schedule handoff RUN_ID --runtime claude|manus` to write an exact proposal-pinned handoff instead.\n" +
@@ -1459,13 +1505,18 @@ async function main(): Promise<void> {
       runFinalize(process.cwd(), rest);
       break;
     case "manus":
-      await runManus(process.cwd(), rest);
+      if (rest[0] !== "run") throw new Error("Usage: feature-inventor manus run --run RUN_ID [options]");
+      await runRuntime(process.cwd(), ["--runtime", "manus", ...rest.slice(1)]);
       break;
     case "schedule":
       runSchedule(process.cwd(), rest);
       break;
     case "claude":
-      await runClaude(process.cwd(), rest);
+      if (rest[0] !== "run") throw new Error("Usage: feature-inventor claude run --run RUN_ID [--json]");
+      await runRuntime(process.cwd(), ["--runtime", "claude", ...rest.slice(1)]);
+      break;
+    case "run":
+      await runRuntime(process.cwd(), rest);
       break;
     case "recap": {
       const sinceIndex = rest.indexOf("--since");

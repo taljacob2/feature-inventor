@@ -69,3 +69,11 @@ Do not prioritize a dashboard, parallel feature execution, fleet management, or 
 ## Definition of success
 
 A maintainer can initialize Feature Inventor for one repository, understand the governing policy, produce a one-feature proposal pinned to a commit, execute it in an isolated workspace, inspect a durable review packet, recover cleanly after interruption, and observe no default-branch or remote change without an explicit human decision.
+
+## Runtime adapter registry
+
+The shared execution model is now exposed through a registry of runtime adapters. The core owns immutable proposal validation, environment pinning, journal transitions, runtime-result validation, review evidence, and explicit finalization. Providers register an adapter that exposes a stable identifier, declared capabilities, preflight, and launch behavior. The public `run --runtime ID --run RUN_ID` command selects from this registry; `manus run` and `claude run` remain compatibility aliases.
+
+> Adapters may translate provider work into a normalized handle and observation, but they may not write governed journal events, mark a run reviewable, or finalize a run directly.
+
+A future Codex adapter therefore belongs under `src/runtimes/`, registers a `codex` identifier, and must pass the same conformance suite without altering core review or finalization logic. The remaining registry work is to move passive observation behind the same interface. Manus has provider-specific task-event polling, while Claude Code completes locally and synchronously. Those are adapter capabilities, not separate governed lifecycles.
