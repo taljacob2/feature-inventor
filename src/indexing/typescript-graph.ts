@@ -1,9 +1,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import ts from "typescript";
-import { type ModuleEdgeKind, type ModuleGraph, type ModuleGraphEdge, type ModuleGraphNode, type RepositoryInventoryFile } from "./types.js";
+import {
+  type ModuleEdgeKind,
+  type ModuleGraph,
+  type ModuleGraphEdge,
+  type ModuleGraphLanguage,
+  type ModuleGraphNode,
+  type RepositoryInventoryFile,
+} from "./types.js";
 
 const TYPESCRIPT_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts"];
+const JAVASCRIPT_EXTENSIONS = [".js", ".jsx", ".mjs", ".cjs"];
+const SVELTE_EXTENSIONS = [".svelte"];
+const SOURCE_EXTENSIONS = [...TYPESCRIPT_EXTENSIONS, ...JAVASCRIPT_EXTENSIONS, ...SVELTE_EXTENSIONS];
+const SVELTE_SCRIPT_BLOCK = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
 
 function toRepositoryPath(repoRoot: string, absolutePath: string): string {
   return relative(repoRoot, absolutePath).split("\\").join("/");
@@ -65,14 +76,31 @@ function exportsFromSourceFile(sourceFile: ts.SourceFile): string[] {
   return [...names].sort((left, right) => left.localeCompare(right));
 }
 
+function moduleGraphLanguage(file: RepositoryInventoryFile): ModuleGraphLanguage | null {
+  if (file.language === "typescript" || file.language === "javascript" || file.language === "svelte") return file.language;
+  return null;
+}
+
+function scriptKindFor(language: ModuleGraphLanguage, path: string): ts.ScriptKind {
+  if (language === "svelte") return ts.ScriptKind.JS;
+  if (language === "typescript") return path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  return path.endsWith(".jsx") ? ts.ScriptKind.JSX : ts.ScriptKind.JS;
+}
+
+/** Extracts all module and instance script blocks without interpreting Svelte markup. */
+function sourceContentForGraph(language: ModuleGraphLanguage, content: string): string {
+  if (language !== "svelte") return content;
+  return [...content.matchAll(SVELTE_SCRIPT_BLOCK)].map((match) => match[1] ?? "").join("\n");
+}
+
 function resolveRelativeModule(sourcePath: string, specifier: string, indexedPaths: ReadonlySet<string>): string | null {
   if (!specifier.startsWith(".")) return null;
   const direct = resolve(dirname(sourcePath), specifier);
-  const sourceBase = direct.replace(/\.(?:c|m)?js$/i, "");
+  const sourceBase = direct.replace(/\.(?:c|m)?jsx?$/i, "");
   const candidates = [
     direct,
-    ...TYPESCRIPT_EXTENSIONS.map((extension) => `${sourceBase}${extension}`),
-    ...TYPESCRIPT_EXTENSIONS.map((extension) => resolve(sourceBase, `index${extension}`)),
+    ...SOURCE_EXTENSIONS.map((extension) => `${sourceBase}${extension}`),
+    ...SOURCE_EXTENSIONS.map((extension) => resolve(sourceBase, `index${extension}`)),
   ];
   for (const candidate of candidates) {
     if (existsSync(candidate) && indexedPaths.has(candidate)) return candidate;
@@ -123,26 +151,29 @@ function collectEdges(
 }
 
 /**
- * Extracts a file-level graph from TypeScript syntax. Only source-relative
- * modules resolve to internal edges; package and unresolved imports stay visible
- * as external edges instead of becoming fabricated repository relationships.
+ * Extracts a file-level graph from TypeScript, JavaScript, and Svelte script
+ * syntax. Svelte markup is intentionally not interpreted; only explicit script
+ * imports and exports contribute evidence. Source-relative modules resolve to
+ * internal edges, while package and unresolved imports remain external.
  */
-export function buildTypeScriptModuleGraph(
+export function buildSourceModuleGraph(
   repoRoot: string,
   generatedForCommit: string,
   inventoryFiles: readonly RepositoryInventoryFile[],
 ): ModuleGraph {
-  const typeScriptFiles = inventoryFiles.filter((file) => file.language === "typescript");
-  const indexedPaths = new Set(typeScriptFiles.map((file) => resolve(repoRoot, file.path)));
+  const sourceFiles = inventoryFiles
+    .map((file) => ({ file, language: moduleGraphLanguage(file) }))
+    .filter((entry): entry is { file: RepositoryInventoryFile; language: ModuleGraphLanguage } => entry.language !== null);
+  const indexedPaths = new Set(sourceFiles.map(({ file }) => resolve(repoRoot, file.path)));
   const nodes: ModuleGraphNode[] = [];
   const edges: ModuleGraphEdge[] = [];
   const warnings: string[] = [];
-  for (const inventoryFile of typeScriptFiles) {
+  for (const { file: inventoryFile, language } of sourceFiles) {
     const absolutePath = resolve(repoRoot, inventoryFile.path);
     try {
-      const content = readFileSync(absolutePath, "utf8");
-      const sourceFile = ts.createSourceFile(absolutePath, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-      nodes.push({ path: inventoryFile.path, language: "typescript", exports: exportsFromSourceFile(sourceFile), isTest: inventoryFile.kind === "test" });
+      const content = sourceContentForGraph(language, readFileSync(absolutePath, "utf8"));
+      const sourceFile = ts.createSourceFile(absolutePath, content, ts.ScriptTarget.Latest, true, scriptKindFor(language, inventoryFile.path));
+      nodes.push({ path: inventoryFile.path, language, exports: exportsFromSourceFile(sourceFile), isTest: inventoryFile.kind === "test" });
       edges.push(...collectEdges(repoRoot, sourceFile, indexedPaths));
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -153,5 +184,10 @@ export function buildTypeScriptModuleGraph(
   edges.sort((left, right) =>
     [left.source, left.target ?? "", left.kind, left.specifier].join("\u0000").localeCompare([right.source, right.target ?? "", right.kind, right.specifier].join("\u0000")),
   );
-  return { generatedForCommit, language: "typescript", nodes, edges, warnings: warnings.sort((left, right) => left.localeCompare(right)) };
+  const languages = new Set(nodes.map((node) => node.language));
+  const language = languages.size === 1 ? [...languages][0]! : "mixed";
+  return { generatedForCommit, language, nodes, edges, warnings: warnings.sort((left, right) => left.localeCompare(right)) };
 }
+
+/** @deprecated Use buildSourceModuleGraph; retained for source compatibility. */
+export const buildTypeScriptModuleGraph = buildSourceModuleGraph;

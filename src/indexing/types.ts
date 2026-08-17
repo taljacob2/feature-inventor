@@ -124,9 +124,11 @@ export interface RepositoryInventory {
 
 export type ModuleEdgeKind = "import" | "export-from" | "dynamic-import";
 
+export type ModuleGraphLanguage = "typescript" | "javascript" | "svelte";
+
 export interface ModuleGraphNode {
   path: string;
-  language: "typescript";
+  language: ModuleGraphLanguage;
   exports: string[];
   isTest: boolean;
 }
@@ -142,7 +144,8 @@ export interface ModuleGraphEdge {
 
 export interface ModuleGraph {
   generatedForCommit: string;
-  language: "typescript";
+  /** One language when uniform, otherwise an explicit mixed-language graph. */
+  language: ModuleGraphLanguage | "mixed";
   nodes: ModuleGraphNode[];
   edges: ModuleGraphEdge[];
   warnings: string[];
