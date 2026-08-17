@@ -5,6 +5,7 @@
 ### Added
 
 - A validation-only release foundation that builds a reproducible npm tarball, checksum, and provenance record without publishing to npm, GitHub Packages, or any registry.
+- An MIT license, public npm package metadata for `feature-inventor`, and a separately manual, environment-gated OIDC publishing workflow for post-bootstrap releases. The initial public publication remains a maintainer-confirmed bootstrap action.
 
 Append-only log of what actually shipped — whether built by the automated
 nightly loop running unattended, or hand-built in a human-directed session.

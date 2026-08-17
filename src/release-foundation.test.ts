@@ -23,10 +23,14 @@ function createFixture() {
   const packageJson = {
     name: "feature-inventor",
     version: "0.2.0",
-    private: true,
+    private: false,
+    license: "MIT",
+    author: "taljacob2",
+    publishConfig: { access: "public", provenance: true, registry: "https://registry.npmjs.org" },
+    repository: { type: "git", url: "git+https://github.com/taljacob2/feature-inventor.git" },
     type: "module",
     engines: { node: ">=22" },
-    files: ["dist", "README.md", "ARCHITECTURE.md", "INDEX.md", "RELEASING.md", "docs/cli"],
+    files: ["dist", "README.md", "ARCHITECTURE.md", "INDEX.md", "RELEASING.md", "LICENSE", "docs/cli"],
     bin: { "feature-inventor": "dist/cli.js" },
   };
   const packageLock = {
@@ -44,6 +48,7 @@ function createFixture() {
   writeFileSync(join(root, "ARCHITECTURE.md"), "# Architecture\n");
   writeFileSync(join(root, "INDEX.md"), "# Index\n");
   writeFileSync(join(root, "RELEASING.md"), "# Releasing\n");
+  writeFileSync(join(root, "LICENSE"), "MIT License\n");
   writeFileSync(join(root, "docs", "cli", "COMMAND_INTERFACE.md"), "# Command interface\n");
   writeFileSync(join(root, "docs", "cli", "INSTALLATION_AND_ONBOARDING.md"), "# Installation\n");
   return root;
@@ -63,12 +68,24 @@ afterEach(() => {
 });
 
 describe("validation-only release foundation", () => {
-  it("validates a private package, a matching versioned changelog, and its restricted tarball", () => {
+  it("validates a public MIT package, a matching versioned changelog, and its restricted tarball", () => {
     const root = createFixture();
 
     const output = runNode(root, "release-validate.mjs", ["--release", "0.2.0", "--tag", "v0.2.0"]);
 
     expect(output).toContain("Release validation passed for feature-inventor@0.2.0");
+  });
+
+  it("rejects a private package because public npm release metadata is required", () => {
+    const root = createFixture();
+    const packagePath = join(root, "package.json");
+    const packageJson = JSON.parse(readFileSync(packagePath, "utf8")) as { private: boolean };
+    packageJson.private = true;
+    writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+    expect(() => runNode(root, "release-validate.mjs", ["--release", "0.2.0", "--tag", "v0.2.0"])).toThrow(
+      /must explicitly declare "private": false/,
+    );
   });
 
   it("rejects a release tag that does not correspond to the selected version", () => {
@@ -138,16 +155,22 @@ describe("validation-only release foundation", () => {
     });
   });
 
-  it("keeps the checked-in workflow manual, artifact-oriented, and free of registry publication", () => {
+  it("keeps artifact preparation non-publishing while making public npm publication a separately manual OIDC-gated workflow", () => {
     const workflow = readFileSync(resolve(repositoryRoot, ".github", "workflows", "release.yml"), "utf8");
     const workflowDocument = parseDocument(workflow);
+    const publishWorkflow = readFileSync(resolve(repositoryRoot, ".github", "workflows", "publish.yml"), "utf8");
+    const publishWorkflowDocument = parseDocument(publishWorkflow);
     const packageJson = JSON.parse(readFileSync(resolve(repositoryRoot, "package.json"), "utf8")) as {
       private: boolean;
+      license: string;
+      author: string;
       scripts: Record<string, string>;
-      publishConfig?: unknown;
+      publishConfig?: { access?: string; provenance?: boolean; registry?: string };
+      repository: { url: string };
     };
 
     expect(workflowDocument.errors).toEqual([]);
+    expect(publishWorkflowDocument.errors).toEqual([]);
     expect(workflowDocument.toJSON()).toMatchObject({
       name: "Prepare release artifacts",
       jobs: {
@@ -162,8 +185,30 @@ describe("validation-only release foundation", () => {
     expect(workflow).toContain("--draft");
     expect(workflow).not.toMatch(/\bnpm\s+publish\b/);
     expect(workflow).not.toContain("npm.pkg.github.com");
-    expect(packageJson.private).toBe(true);
-    expect(packageJson.publishConfig).toBeUndefined();
+    expect(publishWorkflowDocument.toJSON()).toMatchObject({
+      name: "Publish package to npm",
+      jobs: {
+        publish: { "runs-on": "ubuntu-latest", environment: "npm-publication" },
+      },
+    });
+    expect(publishWorkflow).toContain("workflow_dispatch:");
+    expect(publishWorkflow).toContain("publish_confirmation:");
+    expect(publishWorkflow).toContain("id-token: write");
+    expect(publishWorkflow).toContain("npm install --global npm@^11.15.0");
+    expect(publishWorkflow).toContain("TARBALL=\"release-artifacts/feature-inventor-${RELEASE_VERSION}.tgz\"");
+    expect(publishWorkflow).toContain("npm publish \"$TARBALL\" --provenance --access public");
+    expect(publishWorkflow).not.toContain("NPM_TOKEN");
+    expect(publishWorkflow).not.toContain("NODE_AUTH_TOKEN");
+    expect(publishWorkflow).not.toContain("npm.pkg.github.com");
+    expect(packageJson.private).toBe(false);
+    expect(packageJson.repository.url).toBe("git+https://github.com/taljacob2/feature-inventor.git");
+    expect(packageJson.license).toBe("MIT");
+    expect(packageJson.author).toBe("taljacob2");
+    expect(packageJson.publishConfig).toEqual({
+      access: "public",
+      provenance: true,
+      registry: "https://registry.npmjs.org",
+    });
     expect(packageJson.scripts["release:dry-run"]).toContain("release:artifacts");
   });
 });

@@ -1,0 +1,92 @@
+name: Publish package to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact package version already committed in package.json and CHANGELOG.md, for example 0.1.0
+        required: true
+        type: string
+      tag:
+        description: Existing release tag that must equal v followed by the version, for example v0.1.0
+        required: true
+        type: string
+      publish_confirmation:
+        description: Type "publish VERSION" exactly, for example publish 0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish verified public package
+    runs-on: ubuntu-latest
+    environment: npm-publication
+    steps:
+      - name: Check out selected source revision
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Use npm with trusted-publishing support
+        run: npm install --global npm@^11.15.0
+
+      - name: Confirm typed publication intent
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          PUBLISH_CONFIRMATION: ${{ inputs.publish_confirmation }}
+        run: |
+          if [ "$PUBLISH_CONFIRMATION" != "publish $RELEASE_VERSION" ]; then
+            echo "Publication confirmation must exactly equal: publish $RELEASE_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Confirm release tag points to this source revision
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          TARGET_COMMIT: ${{ github.sha }}
+        run: |
+          git fetch --force --tags origin
+          if [ "$(git rev-parse "$RELEASE_TAG^{commit}")" != "$TARGET_COMMIT" ]; then
+            echo "Release tag $RELEASE_TAG must resolve to the selected source revision $TARGET_COMMIT." >&2
+            exit 1
+          fi
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build and test
+        run: |
+          npm run build
+          npm test
+
+      - name: Validate release metadata and package content
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: npm run release:validate -- --release "$RELEASE_VERSION" --tag "$RELEASE_TAG"
+
+      - name: Build and verify release artifacts
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          npm run release:artifacts -- --release "$RELEASE_VERSION" --tag "$RELEASE_TAG" --output release-artifacts
+          sha256sum --check release-artifacts/checksums.txt
+
+      - name: Publish the verified public package with npm trusted publishing
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          TARBALL="release-artifacts/feature-inventor-${RELEASE_VERSION}.tgz"
+          test -f "$TARBALL"
+          npm publish "$TARBALL" --provenance --access public

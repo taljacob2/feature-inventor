@@ -11,6 +11,7 @@ const REQUIRED_PACKAGE_FILES = [
   "ARCHITECTURE.md",
   "INDEX.md",
   "RELEASING.md",
+  "LICENSE",
   "docs/cli",
 ];
 const REQUIRED_PACKED_PATHS = [
@@ -19,6 +20,7 @@ const REQUIRED_PACKED_PATHS = [
   "ARCHITECTURE.md",
   "INDEX.md",
   "RELEASING.md",
+  "LICENSE",
   "docs/cli/COMMAND_INTERFACE.md",
   "docs/cli/INSTALLATION_AND_ONBOARDING.md",
   "package.json",
@@ -88,17 +90,32 @@ function inspectPackedFiles() {
 }
 
 function assertPackageContract(packageJson) {
-  if (packageJson.private !== true) {
-    fail('package.json must retain "private": true until an explicit publication decision is made.');
+  if (packageJson.private !== false) {
+    fail('package.json must explicitly declare "private": false for the approved public npm policy.');
   }
   if (!SEMVER_PATTERN.test(packageJson.version)) {
     fail(`package version ${JSON.stringify(packageJson.version)} must use release semantic version format X.Y.Z.`);
   }
   if (packageJson.name !== "feature-inventor") {
-    fail(`package name must remain "feature-inventor" while the current private distribution policy is in effect.`);
+    fail('package name must remain "feature-inventor" under the approved public distribution policy.');
   }
-  if (packageJson.publishConfig !== undefined) {
-    fail("package.json must not declare publishConfig while registry publishing is deliberately disabled.");
+  if (packageJson.repository?.url !== "git+https://github.com/taljacob2/feature-inventor.git") {
+    fail("package.json must declare the canonical public GitHub repository URL for trusted publishing provenance.");
+  }
+  if (packageJson.license !== "MIT") {
+    fail('package.json must declare the approved MIT license.');
+  }
+  if (packageJson.author !== "taljacob2") {
+    fail('package.json must declare taljacob2 as the approved package owner.');
+  }
+  if (packageJson.publishConfig?.access !== "public") {
+    fail('package.json must declare public npm access.');
+  }
+  if (packageJson.publishConfig?.provenance !== true) {
+    fail('package.json must require npm provenance for public publication.');
+  }
+  if (packageJson.publishConfig?.registry !== "https://registry.npmjs.org") {
+    fail('package.json must target the public npm registry at https://registry.npmjs.org.');
   }
   if (packageJson.bin?.["feature-inventor"] !== "dist/cli.js") {
     fail('package.json must expose the "feature-inventor" CLI through dist/cli.js.');
@@ -170,7 +187,7 @@ export function validateRelease({ argv = process.argv.slice(2) } = {}) {
     packedFileCount: packedPaths.length,
     release: options.release ?? null,
     tag: options.tag ?? null,
-    privatePackageGuard: packageJson.private === true,
+    publicNpmPolicy: packageJson.private === false && packageJson.license === "MIT" && packageJson.publishConfig?.access === "public",
   };
 }
 
