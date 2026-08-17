@@ -116,6 +116,13 @@ import {
   type DaemonHealth,
   type DaemonLogEntry,
 } from "./daemon.js";
+import {
+  detectTerminalCapabilities,
+  parseGlobalCliArguments,
+  resolvePresentation,
+  withLegacyJsonArgument,
+} from "./cli/terminal.js";
+import { formatCommandHelp, formatTopLevelHelp, formatUnknownHelpTopic } from "./cli/help.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -1206,6 +1213,46 @@ function formatDaemonAge(ageMs: number | null): string {
   return `${Math.floor(ageMs / 3_600_000)}h ${Math.floor((ageMs % 3_600_000) / 60_000)}m`;
 }
 
+export function formatOverview(data: StatusData): string {
+  const activeQueue = data.nowItems.length > 0 ? data.nowItems : data.nextPreview;
+  const readyForReview = data.governedRuns.find((run) => run.reviewReadiness === "ready-to-finalize");
+  const blockedRun = data.governedRuns.find((run) => run.reviewReadiness === "blocked");
+  const nextStep = readyForReview
+    ? `Review ${readyForReview.runId}: feature-inventor review ${readyForReview.runId}`
+    : blockedRun
+      ? `Inspect blocked run ${blockedRun.runId}: feature-inventor review ${blockedRun.runId}`
+      : activeQueue.length > 0
+        ? "Create a governed proposal: feature-inventor propose"
+        : "Inspect approved candidates: feature-inventor plan";
+  const lines = [
+    "Feature Inventor | Overview",
+    "Governed repository improvement. No runtime starts from this command.",
+    "",
+    `QUEUE (${activeQueue.length})`,
+    ...(activeQueue.length > 0 ? activeQueue.slice(0, 3).map((item) => `  - ${item}`) : ["  (no current queue item)"]),
+    "",
+    `GOVERNED RUNS (${data.governedRuns.length})`,
+    ...(data.governedRuns.length > 0
+      ? data.governedRuns.slice(0, 3).map((run) => {
+          const review = run.reviewReadiness ? `; review ${run.reviewReadiness}` : "";
+          return `  - ${run.runId}: ${run.status}${review}`;
+        })
+      : ["  (none recorded yet)"]),
+    "",
+    "NEXT SAFE STEP",
+    `  ${nextStep}`,
+    "",
+    `BACKLOG  Next ${data.backlogCounts.next} | Later ${data.backlogCounts.later} | Horizon ${data.backlogCounts.horizon}`,
+    "Run `feature-inventor help` to discover commands or `feature-inventor doctor` to recheck prerequisites.",
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+export function printOverview(repoRoot: string, options: { json?: boolean } = {}): void {
+  const data = getStatusData(repoRoot);
+  console.log(options.json ? JSON.stringify(data, null, 2) : formatOverview(data));
+}
+
 export function printStatus(repoRoot: string, options: { json?: boolean } = {}): void {
   const data = getStatusData(repoRoot);
 
@@ -1743,23 +1790,13 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
   throw new Error(LEGACY_DAEMON_RETIRED_MESSAGE);
 }
 
-const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | docs validate [--json] | index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json] | index context --feature ID|--flow ID|--path PATH|--command NAME [--pack orientation|change|verification|deep] [--max-tokens COUNT] [--json] | plan [--json] | propose [--context-pack PATH] [--no-auto-index] [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
-  "daemon [clean | --once | --every DURATION ...] | --help | --version]\n" +
-  "  daemon execution is retired and fails closed because it used the archived nightly workflow. " +
-  "Use `schedule handoff RUN_ID --runtime claude|manus` to write an exact proposal-pinned handoff instead.\n" +
-  "  daemon clean still stops leftover stuck/idle background sessions from prior daemon runs against " +
-  "this repo (never touches actively-busy sessions or unrelated background work).";
-
-/**
- * Prints usage/description and exits 0. Shared by the `--help`/`-h` flags
- * (feature-inventor treats those as top-level commands, not options of
- * `status`) so `feature-inventor --help` behaves the way users expect from
- * virtually every other CLI instead of falling through to "Unknown command".
- */
-export function printHelp(): void {
-  console.log("feature-inventor — a self-hosted, self-growing nightly feature-building loop.\n");
-  console.log(USAGE);
+/** Prints concise grouped help for discovery without changing command semantics. */
+export function printHelp(topic?: string): void {
+  if (!topic) {
+    console.log(formatTopLevelHelp());
+    return;
+  }
+  console.log(formatCommandHelp(topic) ?? formatUnknownHelpTopic(topic));
 }
 
 /**
@@ -1844,101 +1881,120 @@ function parseProposeOptions(args: string[]): ProposeOptions {
   return { json, contextPackPath, skipAutomaticPreparation };
 }
 
-async function main(): Promise<void> {
-  const [, , command, ...rest] = process.argv;
+export async function runCli(args: string[] = process.argv.slice(2), defaultCwd: string = process.cwd()): Promise<void> {
+  const parsed = parseGlobalCliArguments(args);
+  const command = parsed.command;
+  const rest = withLegacyJsonArgument(parsed.commandArgs, parsed.options);
+  const repoRoot = parsed.options.cwd ?? defaultCwd;
+  const json = parsed.options.format === "json";
 
-  switch (command ?? "status") {
+  // The current renderers remain intentionally unchanged in this foundation
+  // release. Resolving terminal capabilities here gives future presenters one
+  // tested cross-platform decision point without changing governance behavior.
+  void resolvePresentation(parsed.options, detectTerminalCapabilities());
+
+  if (command === undefined && (rest.includes("--version") || rest.includes("-v"))) {
+    printVersion();
+    return;
+  }
+  if (command === undefined || command === "help" || command === "--help" || command === "-h") {
+    printHelp(command === "help" ? rest[0] : undefined);
+    return;
+  }
+  if (rest.includes("--help") || rest.includes("-h")) {
+    printHelp(command);
+    return;
+  }
+
+  switch (command) {
     case "status":
-      printStatus(process.cwd(), { json: rest.includes("--json") });
+      printStatus(repoRoot, { json });
       break;
     case "doctor":
-      await runDoctor(process.cwd(), { json: rest.includes("--json") });
+      await runDoctor(repoRoot, { json });
       break;
     case "docs":
       if (rest[0] !== "validate" || rest.slice(1).some((arg) => arg !== "--json")) {
         throw new Error("Usage: feature-inventor docs validate [--json]");
       }
-      runDocsValidate(process.cwd(), { json: rest.includes("--json") });
+      runDocsValidate(repoRoot, { json });
       break;
     case "index":
-      await runIndex(process.cwd(), rest);
+      await runIndex(repoRoot, rest);
       break;
     case "plan":
-      printRunPlan(process.cwd(), { json: rest.includes("--json") });
+      printRunPlan(repoRoot, { json });
       break;
     case "propose":
-      await runPropose(process.cwd(), parseProposeOptions(rest));
+      await runPropose(repoRoot, parseProposeOptions(rest));
       break;
     case "journal":
-      runJournal(process.cwd(), rest);
+      runJournal(repoRoot, rest);
       break;
     case "watch":
-      await runWatch(process.cwd(), rest, "watch");
+      await runWatch(repoRoot, rest, "watch");
       break;
     case "recover":
-      await runWatch(process.cwd(), rest, "recover");
+      await runWatch(repoRoot, rest, "recover");
       break;
     case "capture":
-      await runCapture(process.cwd(), rest);
+      await runCapture(repoRoot, rest);
       break;
     case "verify":
-      runVerify(process.cwd(), rest);
+      runVerify(repoRoot, rest);
       break;
     case "review":
-      runReview(process.cwd(), rest);
+      runReview(repoRoot, rest);
       break;
     case "finalize":
-      runFinalize(process.cwd(), rest);
+      runFinalize(repoRoot, rest);
       break;
     case "manus":
       if (rest[0] !== "run") throw new Error("Usage: feature-inventor manus run --run RUN_ID [options]");
-      await runRuntime(process.cwd(), ["--runtime", "manus", ...rest.slice(1)]);
+      await runRuntime(repoRoot, ["--runtime", "manus", ...rest.slice(1)]);
       break;
     case "schedule":
-      runSchedule(process.cwd(), rest);
+      runSchedule(repoRoot, rest);
       break;
     case "claude":
       if (rest[0] !== "run") throw new Error("Usage: feature-inventor claude run --run RUN_ID [--json]");
-      await runRuntime(process.cwd(), ["--runtime", "claude", ...rest.slice(1)]);
+      await runRuntime(repoRoot, ["--runtime", "claude", ...rest.slice(1)]);
       break;
     case "run":
-      await runRuntime(process.cwd(), rest);
+      await runRuntime(repoRoot, rest);
       break;
     case "recap": {
       const sinceIndex = rest.indexOf("--since");
       const since = sinceIndex !== -1 ? rest[sinceIndex + 1] : undefined;
-      runRecap(process.cwd(), {
+      runRecap(repoRoot, {
         since,
         all: rest.includes("--all"),
         peek: rest.includes("--peek"),
-        json: rest.includes("--json"),
+        json,
       });
       break;
     }
     case "stop":
-      runStop(process.cwd(), { cancel: rest.includes("--cancel") });
+      runStop(repoRoot, { cancel: rest.includes("--cancel") });
       break;
     case "daemon": {
       if (rest[0] === "clean") {
-        await cleanStaleSessions(process.cwd());
+        await cleanStaleSessions(repoRoot);
         break;
       }
-      await runDaemon(process.cwd(), parseDaemonOptions(rest));
+      await runDaemon(repoRoot, parseDaemonOptions(rest));
       break;
     }
-    case "--help":
-    case "-h":
-      printHelp();
-      break;
-    case "--version":
-    case "-v":
-      printVersion();
+    case "overview":
+      printOverview(repoRoot, { json });
       break;
     default:
-      console.error(`Unknown command: ${command}`);
-      console.error(USAGE);
-      process.exit(1);
+      throw new Error(`Unknown command: ${command}. Run \`feature-inventor help\` for available commands.`);
   }
+}
+
+async function main(): Promise<void> {
+  await runCli();
 }
 
 /**
