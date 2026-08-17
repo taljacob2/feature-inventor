@@ -35,7 +35,8 @@ flows:
         role: command-dispatch
 `;
 
-const MANIFEST = JSON.stringify({
+function manifest(autoPrepareOnPropose = false): string {
+  return JSON.stringify({
   schemaVersion: 1,
   repository: { url: "https://github.com/example/context-provenance.git", defaultBranch: "master" },
   goals: ["Exercise provenance"],
@@ -49,13 +50,14 @@ const MANIFEST = JSON.stringify({
     manualReviewProtectedPaths: true,
   },
   schedule: { mode: "manual" },
-  indexing: DEFAULT_INDEXING_CONFIG,
+  indexing: { ...DEFAULT_INDEXING_CONFIG, autoPrepareOnPropose },
 }, null, 2);
+}
 
 describe("proposal context-pack provenance", () => {
   const directories: string[] = [];
 
-  function createFixture(): { directory: string; commit: string } {
+  function createFixture(autoPrepareOnPropose = false, roadmapTitle = "Exercise provenance"): { directory: string; commit: string } {
     const directory = mkdtempSync(join(tmpdir(), "feature-inventor-proposal-context-"));
     directories.push(directory);
     execFileSync("git", ["init", "-b", "master"], { cwd: directory, stdio: "pipe" });
@@ -65,8 +67,8 @@ describe("proposal context-pack provenance", () => {
     mkdirSync(join(directory, "src"));
     writeFileSync(join(directory, ".gitignore"), ".feature-inventor/\n", "utf8");
     writeFileSync(join(directory, "INDEX.md"), "# Fixture\n", "utf8");
-    writeFileSync(join(directory, "ROADMAP.md"), "# Roadmap\n\n## Now\n- [ ] Exercise provenance\n", "utf8");
-    writeFileSync(join(directory, "feature-inventor.target.json"), MANIFEST, "utf8");
+    writeFileSync(join(directory, "ROADMAP.md"), `# Roadmap\n\n## Now\n- [ ] ${roadmapTitle}\n`, "utf8");
+    writeFileSync(join(directory, "feature-inventor.target.json"), manifest(autoPrepareOnPropose), "utf8");
     writeFileSync(join(directory, "docs", "indexing", "features.yml"), REGISTRY, "utf8");
     writeFileSync(join(directory, "src", "entry.ts"), 'import { service } from "./service.js";\nexport function run(): string { return service(); }\n', "utf8");
     writeFileSync(join(directory, "src", "service.ts"), 'export function service(): string { return "ok"; }\n', "utf8");
@@ -79,6 +81,61 @@ describe("proposal context-pack provenance", () => {
   afterEach(() => {
     while (directories.length > 0) rmSync(directories.pop()!, { recursive: true, force: true });
     vi.restoreAllMocks();
+  });
+
+  it("automatically refreshes a clean index and attaches a context pack for one exact curated feature", async () => {
+    const { directory, commit } = createFixture(true, "Sample");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runPropose(directory, { json: true });
+    const proposalData = JSON.parse(String(logSpy.mock.calls[0]?.[0]));
+    const proposal = parseRunProposal(readFileSync(proposalData.proposalPath, "utf8"));
+
+    expect(proposalData.automaticPreparation).toMatchObject({
+      mode: "automatic",
+      targetCommit: commit,
+      selector: { kind: "feature", value: "sample" },
+      skippedReason: null,
+    });
+    expect(proposal.contextPack).toMatchObject({ targetCommit: commit, selector: { kind: "feature", value: "sample" } });
+    expect(proposal.riskVerification).toMatchObject({
+      policyApplied: true,
+      classification: { riskTags: ["lifecycle-state"] },
+      requiredChecks: ["npm test", "npm run lifecycle", "npm run protected"],
+    });
+    expect(existsSync(join(proposalData.automaticPreparation.snapshotDirectory, "metadata.json"))).toBe(true);
+  });
+
+  it("refreshes the index without guessing a context scope when no exact curated feature matches", async () => {
+    const { directory } = createFixture(true, "A roadmap title that does not match a feature");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runPropose(directory, { json: true });
+    const proposalData = JSON.parse(String(logSpy.mock.calls[0]?.[0]));
+    const proposal = parseRunProposal(readFileSync(proposalData.proposalPath, "utf8"));
+
+    expect(proposalData.automaticPreparation).toMatchObject({ selector: null, contextPack: null });
+    expect(proposalData.automaticPreparation.skippedReason).toContain("No single exact curated feature");
+    expect(proposal.contextPack).toBeUndefined();
+  });
+
+  it("fails closed rather than building automatic context from a dirty checkout", async () => {
+    const { directory } = createFixture(true, "Sample");
+    writeFileSync(join(directory, "uncommitted.txt"), "dirty\n", "utf8");
+
+    await expect(runPropose(directory, { json: true })).rejects.toThrow("requires a clean working tree");
+  });
+
+  it("allows explicit proposal creation to opt out of manifest-enabled automatic preparation", async () => {
+    const { directory } = createFixture(true, "Sample");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runPropose(directory, { json: true, skipAutomaticPreparation: true });
+    const proposalData = JSON.parse(String(logSpy.mock.calls[0]?.[0]));
+    const proposal = parseRunProposal(readFileSync(proposalData.proposalPath, "utf8"));
+
+    expect(proposalData.automaticPreparation).toBeNull();
+    expect(proposal.contextPack).toBeUndefined();
   });
 
   it("records a fresh persisted context pack as informational immutable proposal provenance", async () => {

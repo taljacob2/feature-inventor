@@ -122,7 +122,7 @@ function parseIndexingConfig(value: unknown, warnings: string[]): IndexingConfig
   const indexing = requireRecord(value, `${TARGET_MANIFEST_FILENAME}.indexing`);
   warnUnknownKeys(
     indexing,
-    ["enabled", "historyDays", "defaultContextPack", "maxEstimatedTokens", "includeGovernedArtifacts"],
+    ["enabled", "historyDays", "defaultContextPack", "maxEstimatedTokens", "includeGovernedArtifacts", "autoPrepareOnPropose"],
     `${TARGET_MANIFEST_FILENAME}.indexing`,
     warnings,
   );
@@ -139,6 +139,9 @@ function parseIndexingConfig(value: unknown, warnings: string[]): IndexingConfig
       indexing.includeGovernedArtifacts,
       `${TARGET_MANIFEST_FILENAME}.indexing.includeGovernedArtifacts`,
     ),
+    autoPrepareOnPropose: indexing.autoPrepareOnPropose === undefined
+      ? false
+      : requireBoolean(indexing.autoPrepareOnPropose, `${TARGET_MANIFEST_FILENAME}.indexing.autoPrepareOnPropose`),
   };
 }
 

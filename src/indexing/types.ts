@@ -11,6 +11,8 @@ export interface IndexingConfig {
   defaultContextPack: ContextPackKind;
   maxEstimatedTokens: number;
   includeGovernedArtifacts: boolean;
+  /** Refresh a local index during explicit proposal creation; never executes a runtime. */
+  autoPrepareOnPropose: boolean;
 }
 
 export const DEFAULT_INDEXING_CONFIG: IndexingConfig = {
@@ -19,6 +21,7 @@ export const DEFAULT_INDEXING_CONFIG: IndexingConfig = {
   defaultContextPack: "change",
   maxEstimatedTokens: 4_000,
   includeGovernedArtifacts: true,
+  autoPrepareOnPropose: false,
 };
 
 export interface IndexSourceCoverage {

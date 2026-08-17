@@ -31,6 +31,7 @@
     "historyDays": 90,
     "defaultContextPack": "change",
     "maxEstimatedTokens": 4000,
-    "includeGovernedArtifacts": true
+    "includeGovernedArtifacts": true,
+    "autoPrepareOnPropose": true
   }
 }

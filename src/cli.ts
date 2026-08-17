@@ -37,6 +37,7 @@ import { INDEX_ARTIFACT_FILENAMES, buildIndexSnapshot, readIndexArtifact, readIn
 import { buildContextPack, formatContextPack, persistContextPack } from "./indexing/context-pack.js";
 import { resolveContextScope } from "./indexing/context-scope.js";
 import { createContextPackReference } from "./context-pack-provenance.js";
+import { prepareAutomaticProposalContext } from "./automatic-proposal-preparation.js";
 import { deriveRiskAwareVerificationDecision } from "./risk-verification-policy.js";
 import { rowsForHeatmapLens } from "./indexing/heatmaps.js";
 import { formatIndexStatus, getIndexStatus } from "./indexing/index-status.js";
@@ -574,6 +575,7 @@ export async function runIndex(repoRoot: string, args: string[]): Promise<void> 
 interface ProposeOptions {
   json?: boolean;
   contextPackPath?: string;
+  skipAutomaticPreparation?: boolean;
 }
 
 /** Saves a commit-pinned proposal and its initial journal event without launching an execution runtime. */
@@ -585,7 +587,9 @@ export async function runPropose(repoRoot: string, options: ProposeOptions = {})
   if (baseCommit === null) {
     throw new Error(`Could not resolve configured default branch ${manifest.repository.defaultBranch} to a commit`);
   }
+  const plan = getRunPlanData(repoRoot);
   let contextPack;
+  let automaticPreparation;
   if (options.contextPackPath) {
     const indexContext = await loadIndexManifestContext(repoRoot);
     const status = getIndexStatus(repoRoot, indexContext.config, indexContext.targetCommit, indexContext.workspaceClean);
@@ -599,6 +603,9 @@ export async function runPropose(repoRoot: string, options: ProposeOptions = {})
       snapshotDirectory,
       snapshot: status.snapshot!,
     });
+  } else if (manifest.indexing?.autoPrepareOnPropose === true && !options.skipAutomaticPreparation) {
+    automaticPreparation = await prepareAutomaticProposalContext(repoRoot, baseCommit, manifest.indexing, plan);
+    contextPack = automaticPreparation.contextPack ?? undefined;
   }
 
   let riskVerification;
@@ -610,7 +617,7 @@ export async function runPropose(repoRoot: string, options: ProposeOptions = {})
     }
     riskVerification = deriveRiskAwareVerificationDecision(
       manifest,
-      getRunPlanData(repoRoot).queue,
+      plan.queue,
       registryValidation.registry,
       contextPack,
     );
@@ -626,7 +633,7 @@ export async function runPropose(repoRoot: string, options: ProposeOptions = {})
     createdAt,
     baseCommit,
     manifest,
-    plan: getRunPlanData(repoRoot),
+    plan,
     contextPack,
     riskVerification,
   });
@@ -648,7 +655,7 @@ export async function runPropose(repoRoot: string, options: ProposeOptions = {})
     "utf8",
   );
 
-  const data = { runId, proposalPath, journalPath, proposal, warnings };
+  const data = { runId, proposalPath, journalPath, proposal, warnings, automaticPreparation: automaticPreparation ?? null };
   if (options.json) {
     console.log(JSON.stringify(data, null, 2));
     return;
@@ -657,6 +664,10 @@ export async function runPropose(repoRoot: string, options: ProposeOptions = {})
   console.log(`Base commit: ${baseCommit}`);
   console.log(`Proposal: ${proposalPath}`);
   console.log(`Journal: ${journalPath}`);
+  if (automaticPreparation) {
+    console.log(`Automatic index snapshot: ${automaticPreparation.snapshotDirectory}`);
+    if (automaticPreparation.skippedReason) console.log(`Automatic context pack skipped: ${automaticPreparation.skippedReason}`);
+  }
   if (proposal.contextPack) {
     console.log(`Context pack provenance: ${proposal.contextPack.id} (${proposal.contextPack.jsonPath})`);
     console.log("Context-pack provenance is informational design context, not verification evidence or execution authorization.");
@@ -1733,7 +1744,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | docs validate [--json] | index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json] | index context --feature ID|--flow ID|--path PATH|--command NAME [--pack orientation|change|verification|deep] [--max-tokens COUNT] [--json] | plan [--json] | propose [--context-pack PATH] [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | docs validate [--json] | index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json] | index context --feature ID|--flow ID|--path PATH|--command NAME [--pack orientation|change|verification|deep] [--max-tokens COUNT] [--json] | plan [--json] | propose [--context-pack PATH] [--no-auto-index] [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once | --every DURATION ...] | --help | --version]\n" +
   "  daemon execution is retired and fails closed because it used the archived nightly workflow. " +
   "Use `schedule handoff RUN_ID --runtime claude|manus` to write an exact proposal-pinned handoff instead.\n" +
@@ -1806,12 +1817,18 @@ export function parseDaemonOptions(args: string[]): DaemonOptions {
 
 function parseProposeOptions(args: string[]): ProposeOptions {
   let contextPackPath: string | undefined;
+  let skipAutomaticPreparation = false;
   let json = false;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") {
       if (json) throw new Error("propose accepts --json at most once");
       json = true;
+      continue;
+    }
+    if (arg === "--no-auto-index") {
+      if (skipAutomaticPreparation) throw new Error("propose accepts --no-auto-index at most once");
+      skipAutomaticPreparation = true;
       continue;
     }
     if (arg === "--context-pack") {
@@ -1824,7 +1841,7 @@ function parseProposeOptions(args: string[]): ProposeOptions {
     }
     throw new Error(`Unknown propose option: ${arg}`);
   }
-  return { json, contextPackPath };
+  return { json, contextPackPath, skipAutomaticPreparation };
 }
 
 async function main(): Promise<void> {
