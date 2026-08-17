@@ -69,8 +69,13 @@ function exitAlternateScreen(): void {
   process.stdout.write("\u001B[?25h\u001B[?1049l");
 }
 
-function isPrintable(input: string): boolean {
-  return input.length === 1 && input >= " " && input !== "\u007f";
+/**
+ * Node keypress events can omit their text payload on Windows for control,
+ * composition, and terminal-specific events. Treat only one printable string
+ * as text input; every other payload is intentionally a harmless no-op.
+ */
+export function isPrintableKeypressInput(input: unknown): input is string {
+  return typeof input === "string" && input.length === 1 && input >= " " && input !== "\u007f";
 }
 
 /**
@@ -141,7 +146,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
     }
   };
 
-  const onKeypress = (input: string, key: Key): void => {
+  const onKeypress = (input: string | undefined, key: Key = {}): void => {
     if (handling || !active) return;
     handling = true;
     void (async () => {
@@ -164,7 +169,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
           } else if (key.name === "return" || key.name === "enter") {
             await executeConfirmation();
             return;
-          } else if (isPrintable(input) && state.confirmation) {
+          } else if (isPrintableKeypressInput(input) && state.confirmation) {
             state.confirmation.typedValue += input;
           }
           render(state);
