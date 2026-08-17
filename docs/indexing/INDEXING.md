@@ -23,7 +23,7 @@ The following increments will add source inventory, language adapters, structura
 
 `docs/indexing/features.yml` declares product capabilities and core flows in terms that static analysis alone cannot reliably discover. It is the semantic bridge between operator intent and source structure.
 
-Each feature declares a stable identifier, human-readable name, intent, entry points, primary implementation paths, tests, flows, and risk tags. Each flow declares source-linked steps and the role each step plays. Registry references use the form `relative/path.ts` or `relative/path.ts#exportedSymbol`.
+Each feature declares a stable identifier, human-readable name, intent, entry points, primary implementation paths, tests, flows, and risk tags. The `tests` field is always present but may be an explicit empty list when the target has no automated test anchors; it must never contain invented coverage. Each flow declares source-linked steps and the role each step plays. Registry references use the form `relative/path.ts` or `relative/path.ts#exportedSymbol`.
 
 The registry must not include guessed features, vague path globs, or generated narrative. Add a feature only when the capability has a clear repository-level purpose and concrete source evidence. A feature may reference more than one entry point, but its primary paths should be the smallest accurate implementation surface.
 
