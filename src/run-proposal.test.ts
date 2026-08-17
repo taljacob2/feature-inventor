@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createRunId, createRunProposal, parseRunProposal, serializeRunProposal } from "./run-proposal.js";
+import { createRunId, createRunProposal, parseRunProposal, serializeRunProposal, type ContextPackReference } from "./run-proposal.js";
 import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
 import type { TargetManifest } from "./target-manifest.js";
 
@@ -11,6 +11,21 @@ const MANIFEST: TargetManifest = {
   protectedPaths: [],
   reviewPolicy: { maxFilesChanged: 12, humanApprovalRequired: true },
   schedule: { mode: "manual" },
+};
+
+const CONTEXT_PACK: ContextPackReference = {
+  schemaVersion: 1,
+  id: "context-0123456789abcdef",
+  targetCommit: "abcdef1234567",
+  jsonPath: ".feature-inventor/index/v1/abcdef1234567/context/context-0123456789abcdef.json",
+  markdownPath: ".feature-inventor/index/v1/abcdef1234567/context/context-0123456789abcdef.md",
+  contentHash: "a".repeat(64),
+  indexSchemaVersion: 1,
+  snapshotConfigDigest: `sha256:${"b".repeat(64)}`,
+  selector: { kind: "feature", value: "governed-run" },
+  packKind: "change",
+  effectiveMaxEstimatedTokens: 4000,
+  estimatedTokens: 2500,
 };
 
 const PLAN = {
@@ -55,6 +70,55 @@ describe("run proposal", () => {
     expect(proposal.manifestHash).toHaveLength(64);
     expect(proposal.policyHash).toHaveLength(64);
     expect(parseRunProposal(serializeRunProposal(proposal))).toEqual(proposal);
+  });
+
+  it("records a validated context-pack reference without changing the proposal schema version", () => {
+    const proposal = createRunProposal({
+      runId: "run-20260817-001",
+      createdAt: "2026-08-17T12:00:00.000Z",
+      baseCommit: "abcdef1234567",
+      manifest: MANIFEST,
+      plan: PLAN,
+      contextPack: CONTEXT_PACK,
+    });
+
+    expect(proposal.contextPack).toEqual(CONTEXT_PACK);
+    expect(proposal.contextPack).not.toBe(CONTEXT_PACK);
+    expect(parseRunProposal(serializeRunProposal(proposal))).toEqual(proposal);
+    expect(parseRunProposal(serializeRunProposal(createRunProposal({
+      runId: "run-20260817-002",
+      createdAt: "2026-08-17T12:00:00.000Z",
+      baseCommit: "abcdef1234567",
+      manifest: MANIFEST,
+      plan: PLAN,
+    }))).contextPack).toBeUndefined();
+  });
+
+  it("rejects context provenance that does not match the proposal target or immutable artifact path", () => {
+    expect(() => createRunProposal({
+      runId: "run-20260817-001",
+      createdAt: "2026-08-17T12:00:00.000Z",
+      baseCommit: "abcdef1234567",
+      manifest: MANIFEST,
+      plan: PLAN,
+      contextPack: {
+        ...CONTEXT_PACK,
+        targetCommit: "1111111111111",
+        jsonPath: ".feature-inventor/index/v1/1111111111111/context/context-0123456789abcdef.json",
+        markdownPath: ".feature-inventor/index/v1/1111111111111/context/context-0123456789abcdef.md",
+      },
+    })).toThrow("targetCommit");
+    expect(() => parseRunProposal(JSON.stringify({
+      ...createRunProposal({
+        runId: "run-20260817-001",
+        createdAt: "2026-08-17T12:00:00.000Z",
+        baseCommit: "abcdef1234567",
+        manifest: MANIFEST,
+        plan: PLAN,
+        contextPack: CONTEXT_PACK,
+      }),
+      contextPack: { ...CONTEXT_PACK, jsonPath: "context.json" },
+    }))).toThrow("jsonPath");
   });
 
   it("rejects invalid run IDs and unpinned targets", () => {
