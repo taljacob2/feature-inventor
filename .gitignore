@@ -6,3 +6,4 @@ dist/
 .feature-inventor-daemon.log.jsonl
 feature-log.jsonl
 .feature-inventor/
+release-artifacts/

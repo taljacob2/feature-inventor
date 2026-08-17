@@ -27,6 +27,7 @@
     "README.md",
     "ARCHITECTURE.md",
     "INDEX.md",
+    "RELEASING.md",
     "docs/cli"
   ],
   "bin": {
@@ -38,7 +39,12 @@
     "start": "node dist/cli.js",
     "test": "vitest run",
     "prepack": "npm run build",
-    "pack:check": "npm pack --dry-run --json"
+    "pack:check": "npm pack --dry-run --json",
+    "release:validate": "node scripts/release-validate.mjs",
+    "release:artifacts": "node scripts/build-release-artifacts.mjs",
+    "release:version": "node scripts/prepare-release-version.mjs",
+    "release:prepare": "npm run build && npm test && npm run release:validate",
+    "release:dry-run": "npm run release:prepare && npm run release:artifacts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
