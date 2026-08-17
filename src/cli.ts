@@ -37,6 +37,7 @@ import { INDEX_ARTIFACT_FILENAMES, buildIndexSnapshot, readIndexArtifact, readIn
 import { buildContextPack, formatContextPack, persistContextPack } from "./indexing/context-pack.js";
 import { resolveContextScope } from "./indexing/context-scope.js";
 import { createContextPackReference } from "./context-pack-provenance.js";
+import { deriveRiskAwareVerificationDecision } from "./risk-verification-policy.js";
 import { rowsForHeatmapLens } from "./indexing/heatmaps.js";
 import { formatIndexStatus, getIndexStatus } from "./indexing/index-status.js";
 import {
@@ -600,6 +601,21 @@ export async function runPropose(repoRoot: string, options: ProposeOptions = {})
     });
   }
 
+  let riskVerification;
+  if (manifest.verificationPolicy) {
+    const registryValidation = validateFeatureRegistryFile(repoRoot);
+    if (!registryValidation.valid || registryValidation.registry === null) {
+      const details = registryValidation.diagnostics.map((diagnostic) => `${diagnostic.path}: ${diagnostic.message}`).join("; ");
+      throw new Error(`Risk-aware verification requires a valid curated feature registry: ${details}`);
+    }
+    riskVerification = deriveRiskAwareVerificationDecision(
+      manifest,
+      getRunPlanData(repoRoot).queue,
+      registryValidation.registry,
+      contextPack,
+    );
+  }
+
   const createdAt = new Date().toISOString();
   const runId = createRunId(new Date(createdAt), baseCommit);
   const runDirectory = join(repoRoot, RUNS_DIRECTORY, runId);
@@ -612,6 +628,7 @@ export async function runPropose(repoRoot: string, options: ProposeOptions = {})
     manifest,
     plan: getRunPlanData(repoRoot),
     contextPack,
+    riskVerification,
   });
   const proposalPath = join(runDirectory, RUN_PROPOSAL_FILENAME);
   const journalPath = join(runDirectory, RUN_JOURNAL_FILENAME);
@@ -643,6 +660,10 @@ export async function runPropose(repoRoot: string, options: ProposeOptions = {})
   if (proposal.contextPack) {
     console.log(`Context pack provenance: ${proposal.contextPack.id} (${proposal.contextPack.jsonPath})`);
     console.log("Context-pack provenance is informational design context, not verification evidence or execution authorization.");
+  }
+  if (proposal.riskVerification) {
+    console.log(`Risk-aware verification: ${proposal.riskVerification.derivedRequiredChecks.length} derived check(s), ${proposal.riskVerification.manualReviewRequired ? "explicit review expected" : "no additional explicit review"}`);
+    if (proposal.riskVerification.manualReviewReasons.length > 0) console.log(`Review reasons: ${proposal.riskVerification.manualReviewReasons.join("; ")}`);
   }
   if (warnings.length > 0) console.log(`Manifest warnings: ${warnings.join("; ")}`);
   console.log("No agent was started and no repository change was made.");
@@ -910,7 +931,16 @@ export function runReview(repoRoot: string, args: string[]): void {
   );
   writeFileSync(reviewPath, serializeReviewPacket(packet), "utf8");
   const data = { runId, reviewPath, packet, outcomePath, verificationPath, runtimeResultPath, runtimeEvidenceCount: runtimeVerification.length };
-  console.log(args.includes("--json") ? JSON.stringify(data, null, 2) : `Created ${packet.readiness} review packet: ${reviewPath}`);
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  const lines = [`Created ${packet.readiness} review packet: ${reviewPath}`];
+  if (packet.proposal.riskVerification) {
+    lines.push(`Risk-aware verification: ${packet.proposal.riskVerification.derivedRequiredChecks.length} derived check(s); ${packet.proposal.riskVerification.manualReviewRequired ? "explicit review expected" : "no additional explicit review"}`);
+    for (const reason of packet.proposal.riskVerification.manualReviewReasons) lines.push(`Review expectation: ${reason}`);
+  }
+  console.log(lines.join("\n"));
 }
 
 /** Finalizes only a ready review packet and only after an explicit local confirmation flag. */

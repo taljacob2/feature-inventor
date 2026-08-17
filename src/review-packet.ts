@@ -1,4 +1,10 @@
-import { assertContextPackReference, type ContextPackReference, type RunProposal } from "./run-proposal.js";
+import {
+  assertContextPackReference,
+  assertRiskAwareVerificationDecision,
+  type ContextPackReference,
+  type RunProposal,
+} from "./run-proposal.js";
+import type { RiskAwareVerificationDecision } from "./risk-verification-policy.js";
 
 export const TASK_OUTCOME_FILENAME = "task-outcome.json";
 export const REVIEW_PACKET_FILENAME = "review.json";
@@ -36,6 +42,8 @@ export interface ReviewPacket {
     requiredChecks: string[];
     /** Informational design-context provenance; never a readiness-gate input. */
     contextPack?: ContextPackReference;
+    /** Derived operator policy record; required checks are already frozen above. */
+    riskVerification?: RiskAwareVerificationDecision;
   };
   taskOutcome: TaskOutcome | null;
   runtimeResultCaptured: boolean;
@@ -105,6 +113,7 @@ export function createReviewPacket(
       policyHash: proposal.policyHash,
       requiredChecks,
       ...(proposal.contextPack ? { contextPack: structuredClone(proposal.contextPack) } : {}),
+      ...(proposal.riskVerification ? { riskVerification: structuredClone(proposal.riskVerification) } : {}),
     },
     taskOutcome,
     runtimeResultCaptured,
@@ -215,6 +224,19 @@ export function parseReviewPacket(content: string): ReviewPacket {
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       throw new Error(`Invalid review packet: proposal.contextPack ${reason}`);
+    }
+  }
+  if (parsed.proposal.riskVerification !== undefined) {
+    if (!isRecord(parsed.proposal.riskVerification)) throw new Error("Invalid review packet: proposal.riskVerification must be an object when present");
+    try {
+      const riskVerification = parsed.proposal.riskVerification as unknown as RiskAwareVerificationDecision;
+      assertRiskAwareVerificationDecision(riskVerification);
+      if (JSON.stringify(parsed.proposal.requiredChecks) !== JSON.stringify(riskVerification.requiredChecks)) {
+        throw new Error("required checks do not match the recorded risk verification decision");
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Invalid review packet: proposal.riskVerification ${reason}`);
     }
   }
   return parsed as unknown as ReviewPacket;

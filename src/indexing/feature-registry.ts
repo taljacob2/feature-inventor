@@ -12,7 +12,7 @@ import {
   type SourceAnchor,
 } from "./types.js";
 
-const SUPPORTED_RISK_TAGS = new Set([
+export const SUPPORTED_RISK_TAGS = new Set([
   "external-runtime",
   "finalization-gate",
   "governance-policy",

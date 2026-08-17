@@ -35,6 +35,8 @@ Generated repository intelligence is deliberately local under `.feature-inventor
 
 `index heatmap` requires one explicit lens and exposes raw values rather than a blended score. `index build` requires a clean checkout so artifacts match their recorded commit. `index context` now selects the smallest direct set of entry points, implementation paths, tests, and direct graph neighbors for exactly one feature, flow, path, or command scope. It requires a fresh snapshot, records source anchors, evidence types, selection reasons, a commit, a policy digest, a hard estimated-token budget, and explicit overflow. It is a retrieval aid only: agents must inspect the linked source before making implementation or verification decisions. `propose --context-pack` may record one matching persisted pack as immutable, content-hashed design provenance. That reference remains informational: it never replaces source or artifact evidence, authorizes execution, or affects review readiness.
 
+When an operator configures `verificationPolicy`, proposal creation validates the curated registry and classifies only explicit approved feature scope: a matching context selector, an exact curated feature ID/name, or a deliberate `feature:` candidate source. Declared protected-path matches and curated risk tags can add only the checks named by the manifest. Manifest `requiredChecks` remain first and authoritative, derived checks are separately recorded, and any manual-review reasons are visible in the proposal and review packet. No fuzzy feature matching, invented command, execution authorization, or automated final approval is permitted.
+
 ## Shared execution model
 
 The core product owns a run lifecycle and runtime adapters implement capabilities. Runtime choice must not redefine product behavior.
@@ -68,7 +70,7 @@ The implementation order is deliberate:
 4. **Foundation complete:** Shared proposal, journal, runtime-result, and evidence gates are enforced for Manus and local Claude Code execution.
 5. **Foundation complete:** Add the committed repository map, source-linked feature registry, indexing policy, validation command, and non-mutating snapshot status. The deterministic builder produces local file inventory, TypeScript graph, Git history, separate heatmap lenses, a report, and token-budgeted context packs. Governed proposals may retain matching persisted pack provenance without treating it as source or verification evidence.
 6. Convert any remaining runtime-specific paths, including the historical workflow script, into explicit adapters or retire them from supported execution.
-7. Add risk-aware verification policies and richer review packets from captured artifacts.
+7. **Foundation complete:** Add risk-aware verification policies based on explicit curated risk tags, protected paths, and operator-configured check mappings. The derived decision is immutable proposal and review metadata; richer captured-artifact interpretation remains future work.
 8. **Complete boundary:** Retire the legacy daemon that invoked the archived workflow. `schedule handoff` now records an exact proposal-pinned command without scheduling or executing it.
 9. Choose and implement an explicit durable scheduler only after a deployment target, run frequency, and review cadence are selected.
 10. Support a selected external target repository only after the shared engine is proven.

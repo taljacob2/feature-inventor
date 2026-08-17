@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createRunId, createRunProposal, parseRunProposal, serializeRunProposal, type ContextPackReference } from "./run-proposal.js";
 import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
+import type { RiskAwareVerificationDecision } from "./risk-verification-policy.js";
 import type { TargetManifest } from "./target-manifest.js";
 
 const MANIFEST: TargetManifest = {
@@ -26,6 +27,17 @@ const CONTEXT_PACK: ContextPackReference = {
   packKind: "change",
   effectiveMaxEstimatedTokens: 4000,
   estimatedTokens: 2500,
+};
+
+const RISK_VERIFICATION: RiskAwareVerificationDecision = {
+  schemaVersion: 1,
+  classification: { riskTags: ["lifecycle-state"], protectedPaths: [], matchedFeatures: [], reasons: ["feature-risk-tag"] },
+  operatorRequiredChecks: ["npm test"],
+  derivedRequiredChecks: ["npm run lifecycle"],
+  requiredChecks: ["npm test", "npm run lifecycle"],
+  manualReviewRequired: true,
+  manualReviewReasons: ["Risk tag requires explicit review: lifecycle-state"],
+  policyApplied: true,
 };
 
 const PLAN = {
@@ -92,6 +104,28 @@ describe("run proposal", () => {
       manifest: MANIFEST,
       plan: PLAN,
     }))).contextPack).toBeUndefined();
+  });
+
+  it("freezes a valid risk decision and uses its derived checks as the proposal gate", () => {
+    const proposal = createRunProposal({
+      runId: "run-20260817-001",
+      createdAt: "2026-08-17T12:00:00.000Z",
+      baseCommit: "abcdef1234567",
+      manifest: { ...MANIFEST, requiredChecks: ["npm test"] },
+      plan: PLAN,
+      riskVerification: RISK_VERIFICATION,
+    });
+    expect(proposal.requiredChecks).toEqual(["npm test", "npm run lifecycle"]);
+    expect(proposal.riskVerification).toEqual(RISK_VERIFICATION);
+    expect(parseRunProposal(serializeRunProposal(proposal))).toEqual(proposal);
+    expect(() => createRunProposal({
+      runId: "run-20260817-001",
+      createdAt: "2026-08-17T12:00:00.000Z",
+      baseCommit: "abcdef1234567",
+      manifest: { ...MANIFEST, requiredChecks: ["npm test", "npm run build"] },
+      plan: PLAN,
+      riskVerification: RISK_VERIFICATION,
+    })).toThrow("operator-required checks");
   });
 
   it("rejects context provenance that does not match the proposal target or immutable artifact path", () => {

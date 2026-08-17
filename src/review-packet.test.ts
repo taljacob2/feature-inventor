@@ -3,6 +3,7 @@ import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
 import { createRunProposal, type ContextPackReference } from "./run-proposal.js";
 import { buildRunPlan } from "./run-plan.js";
 import { createReviewPacket, createTaskOutcome } from "./review-packet.js";
+import type { RiskAwareVerificationDecision } from "./risk-verification-policy.js";
 import type { TargetManifest } from "./target-manifest.js";
 
 const MANIFEST: TargetManifest = {
@@ -30,7 +31,18 @@ const CONTEXT_PACK: ContextPackReference = {
   estimatedTokens: 2500,
 };
 
-function proposal(contextPack?: ContextPackReference) {
+const RISK_VERIFICATION: RiskAwareVerificationDecision = {
+  schemaVersion: 1,
+  classification: { riskTags: ["lifecycle-state"], protectedPaths: [], matchedFeatures: [], reasons: ["feature-risk-tag"] },
+  operatorRequiredChecks: ["npm test", "npm run build"],
+  derivedRequiredChecks: [],
+  requiredChecks: ["npm test", "npm run build"],
+  manualReviewRequired: true,
+  manualReviewReasons: ["Risk tag requires explicit review: lifecycle-state"],
+  policyApplied: true,
+};
+
+function proposal(contextPack?: ContextPackReference, riskVerification?: RiskAwareVerificationDecision) {
   return createRunProposal({
     runId: "run-20260817-001",
     createdAt: "2026-08-17T00:00:00.000Z",
@@ -38,6 +50,7 @@ function proposal(contextPack?: ContextPackReference) {
     manifest: MANIFEST,
     plan: buildRunPlan("# Roadmap\n\n## Now\n- [ ] Ship safely\n", DEFAULT_RUN_POLICY),
     contextPack,
+    riskVerification,
   });
 }
 
@@ -71,6 +84,15 @@ describe("review packet", () => {
       { check: "npm run build", outcome: "passed", recordedAt: "2026-08-17T00:01:40.000Z", evidence: "build passed" },
     ], true);
     expect(packet.proposal.contextPack).toEqual(CONTEXT_PACK);
+    expect(packet).toMatchObject({ readiness: "ready-to-finalize", missingChecks: [], failedChecks: [] });
+  });
+
+  it("surfaces optional risk verification without changing readiness", () => {
+    const packet = createReviewPacket(proposal(undefined, RISK_VERIFICATION), "2026-08-17T00:02:00.000Z", stoppedOutcome(), [
+      { check: "npm test", outcome: "passed", recordedAt: "2026-08-17T00:01:30.000Z", evidence: "tests passed" },
+      { check: "npm run build", outcome: "passed", recordedAt: "2026-08-17T00:01:40.000Z", evidence: "build passed" },
+    ], true);
+    expect(packet.proposal.riskVerification).toEqual(RISK_VERIFICATION);
     expect(packet).toMatchObject({ readiness: "ready-to-finalize", missingChecks: [], failedChecks: [] });
   });
 

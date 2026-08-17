@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { RunPlanData } from "./run-plan.js";
 import type { RunPolicy } from "./engine/contracts.js";
 import type { TargetManifest } from "./target-manifest.js";
+import type { RiskAwareVerificationDecision } from "./risk-verification-policy.js";
 
 export const RUNS_DIRECTORY = ".feature-inventor/runs";
 export const RUN_PROPOSAL_FILENAME = "proposal.json";
@@ -39,6 +40,8 @@ export interface RunProposal {
     baseCommit: string;
   };
   contextPack?: ContextPackReference;
+  /** Deterministic policy record; does not authorize runtime execution. */
+  riskVerification?: RiskAwareVerificationDecision;
   manifestHash: string;
   policyHash: string;
   policy: RunPolicy;
@@ -56,6 +59,7 @@ export interface CreateRunProposalInput {
   manifest: TargetManifest;
   plan: RunPlanData;
   contextPack?: ContextPackReference;
+  riskVerification?: RiskAwareVerificationDecision;
 }
 
 function sha256(value: string): string {
@@ -84,6 +88,29 @@ function assertRunId(value: string): void {
 
 function assertCommit(value: string): void {
   if (!/^[0-9a-f]{7,64}$/i.test(value)) throw new Error("baseCommit must be a Git commit SHA");
+}
+
+export function assertRiskAwareVerificationDecision(decision: RiskAwareVerificationDecision): void {
+  if (decision.schemaVersion !== 1) throw new Error("riskVerification.schemaVersion must be 1");
+  if (!Array.isArray(decision.operatorRequiredChecks) || !Array.isArray(decision.derivedRequiredChecks) || !Array.isArray(decision.requiredChecks)) {
+    throw new Error("riskVerification must contain check arrays");
+  }
+  if (!Array.isArray(decision.classification.riskTags) || !Array.isArray(decision.classification.protectedPaths) || !Array.isArray(decision.classification.matchedFeatures)) {
+    throw new Error("riskVerification.classification is incomplete");
+  }
+  if (!Array.isArray(decision.manualReviewReasons) || typeof decision.manualReviewRequired !== "boolean" || typeof decision.policyApplied !== "boolean") {
+    throw new Error("riskVerification review expectations are invalid");
+  }
+  const unique = (values: string[]): boolean => values.every((value, index) => typeof value === "string" && value.trim() !== "" && values.indexOf(value) === index);
+  if (!unique(decision.operatorRequiredChecks) || !unique(decision.derivedRequiredChecks) || !unique(decision.requiredChecks)) {
+    throw new Error("riskVerification checks must be unique non-empty strings");
+  }
+  if (decision.derivedRequiredChecks.some((check) => decision.operatorRequiredChecks.includes(check))) {
+    throw new Error("riskVerification derived checks must exclude operator-required checks");
+  }
+  if (JSON.stringify(decision.requiredChecks) !== JSON.stringify([...decision.operatorRequiredChecks, ...decision.derivedRequiredChecks])) {
+    throw new Error("riskVerification required checks must preserve operator checks followed by derived checks");
+  }
 }
 
 export function assertContextPackReference(reference: ContextPackReference): void {
@@ -125,6 +152,12 @@ export function createRunProposal(input: CreateRunProposalInput): RunProposal {
       throw new Error("contextPack.targetCommit must match the proposal baseCommit");
     }
   }
+  if (input.riskVerification) {
+    assertRiskAwareVerificationDecision(input.riskVerification);
+    if (JSON.stringify(input.riskVerification.operatorRequiredChecks) !== JSON.stringify(input.manifest.requiredChecks)) {
+      throw new Error("riskVerification operator-required checks must match the manifest");
+    }
+  }
   const policy = {
     ...input.plan.policy,
     testCommands: [...input.plan.policy.testCommands],
@@ -142,11 +175,12 @@ export function createRunProposal(input: CreateRunProposalInput): RunProposal {
       baseCommit: input.baseCommit,
     },
     ...(input.contextPack ? { contextPack: structuredClone(input.contextPack) } : {}),
+    ...(input.riskVerification ? { riskVerification: structuredClone(input.riskVerification) } : {}),
     manifestHash,
     policyHash,
     policy,
     goals: [...input.manifest.goals],
-    requiredChecks: [...input.manifest.requiredChecks],
+    requiredChecks: input.riskVerification ? [...input.riskVerification.requiredChecks] : [...input.manifest.requiredChecks],
     queue: input.plan.queue.map((candidate) => ({ ...candidate })),
     notAttempted: input.plan.notAttempted.map((candidate) => ({ ...candidate })),
     remotePushPolicy: input.plan.policy.remotePushPolicy,
@@ -181,6 +215,15 @@ export function parseRunProposal(content: string): RunProposal {
     assertContextPackReference(proposal.contextPack as ContextPackReference);
     if (proposal.contextPack.targetCommit !== proposal.target.baseCommit) {
       throw new Error("Invalid run proposal: contextPack.targetCommit must match target.baseCommit");
+    }
+  }
+  if (proposal.riskVerification !== undefined) {
+    if (typeof proposal.riskVerification !== "object" || proposal.riskVerification === null || Array.isArray(proposal.riskVerification)) {
+      throw new Error("Invalid run proposal: riskVerification must be an object when present");
+    }
+    assertRiskAwareVerificationDecision(proposal.riskVerification as RiskAwareVerificationDecision);
+    if (JSON.stringify(proposal.requiredChecks) !== JSON.stringify(proposal.riskVerification.requiredChecks)) {
+      throw new Error("Invalid run proposal: requiredChecks must match riskVerification.requiredChecks");
     }
   }
   if (!proposal.policy || !Array.isArray(proposal.policy.testCommands)) throw new Error("Invalid run proposal: policy is required");
