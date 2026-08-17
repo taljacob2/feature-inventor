@@ -63,6 +63,24 @@ describe("target manifest", () => {
     );
   });
 
+  it("accepts an explicit risk-aware verification policy and rejects unsupported risk tags", () => {
+    const verificationPolicy = {
+      riskTagChecks: { "lifecycle-state": ["npm run lifecycle"] },
+      protectedPathChecks: ["npm run protected"],
+      manualReviewRiskTags: ["external-runtime"],
+      manualReviewProtectedPaths: true,
+    };
+    expect(parseTargetManifest(JSON.stringify({ ...MANIFEST, verificationPolicy })).manifest.verificationPolicy).toEqual(verificationPolicy);
+    expect(() => parseTargetManifest(JSON.stringify({
+      ...MANIFEST,
+      verificationPolicy: { ...verificationPolicy, riskTagChecks: { unknown: ["npm test"] } },
+    }))).toThrow("unsupported risk tag unknown");
+    expect(() => parseTargetManifest(JSON.stringify({
+      ...MANIFEST,
+      verificationPolicy: { ...verificationPolicy, manualReviewRiskTags: ["unknown"] },
+    }))).toThrow("unsupported risk tag unknown");
+  });
+
   it("serializes a manifest as reproducible formatted JSON", () => {
     expect(parseTargetManifest(serializeTargetManifest(MANIFEST))).toEqual({ manifest: MANIFEST, warnings: [] });
   });

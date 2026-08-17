@@ -1,6 +1,25 @@
+import { SUPPORTED_RISK_TAGS } from "./indexing/feature-registry.js";
 import { type ContextPackKind, type IndexingConfig } from "./indexing/types.js";
 
 export const TARGET_MANIFEST_FILENAME = "feature-inventor.target.json";
+
+export interface VerificationPolicy {
+  /** Additional required checks keyed by validated curated feature risk tags. */
+  riskTagChecks: Record<string, string[]>;
+  /** Additional required checks whenever approved scope references a protected path. */
+  protectedPathChecks: string[];
+  /** Risk tags that require explicit reviewer attention in the derived policy record. */
+  manualReviewRiskTags: string[];
+  /** Whether protected-path scope requires explicit reviewer attention. */
+  manualReviewProtectedPaths: boolean;
+}
+
+export const DEFAULT_VERIFICATION_POLICY: VerificationPolicy = {
+  riskTagChecks: {},
+  protectedPathChecks: [],
+  manualReviewRiskTags: [],
+  manualReviewProtectedPaths: false,
+};
 
 export interface TargetManifest {
   schemaVersion: 1;
@@ -15,6 +34,8 @@ export interface TargetManifest {
     maxFilesChanged: number;
     humanApprovalRequired: boolean;
   };
+  /** Optional risk-aware verification mappings. Existing manifests remain valid without it. */
+  verificationPolicy?: VerificationPolicy;
   schedule: {
     mode: "manual";
   };
@@ -62,6 +83,39 @@ function requirePositiveInteger(value: unknown, path: string): number {
 function requireBoolean(value: unknown, path: string): boolean {
   if (typeof value !== "boolean") throw new Error(`${path} must be a boolean`);
   return value;
+}
+
+function parseVerificationPolicy(value: unknown, warnings: string[]): VerificationPolicy {
+  const policy = requireRecord(value, `${TARGET_MANIFEST_FILENAME}.verificationPolicy`);
+  warnUnknownKeys(
+    policy,
+    ["riskTagChecks", "protectedPathChecks", "manualReviewRiskTags", "manualReviewProtectedPaths"],
+    `${TARGET_MANIFEST_FILENAME}.verificationPolicy`,
+    warnings,
+  );
+  const riskTagChecksRecord = requireRecord(policy.riskTagChecks, `${TARGET_MANIFEST_FILENAME}.verificationPolicy.riskTagChecks`);
+  const riskTagChecks: Record<string, string[]> = {};
+  for (const [riskTag, checks] of Object.entries(riskTagChecksRecord)) {
+    if (!SUPPORTED_RISK_TAGS.has(riskTag)) throw new Error(`${TARGET_MANIFEST_FILENAME}.verificationPolicy.riskTagChecks contains unsupported risk tag ${riskTag}`);
+    riskTagChecks[riskTag] = requireStringArray(checks, `${TARGET_MANIFEST_FILENAME}.verificationPolicy.riskTagChecks.${riskTag}`, true);
+  }
+  const manualReviewRiskTags = requireStringArray(
+    policy.manualReviewRiskTags,
+    `${TARGET_MANIFEST_FILENAME}.verificationPolicy.manualReviewRiskTags`,
+    true,
+  );
+  for (const riskTag of manualReviewRiskTags) {
+    if (!SUPPORTED_RISK_TAGS.has(riskTag)) throw new Error(`${TARGET_MANIFEST_FILENAME}.verificationPolicy.manualReviewRiskTags contains unsupported risk tag ${riskTag}`);
+  }
+  return {
+    riskTagChecks,
+    protectedPathChecks: requireStringArray(policy.protectedPathChecks, `${TARGET_MANIFEST_FILENAME}.verificationPolicy.protectedPathChecks`, true),
+    manualReviewRiskTags,
+    manualReviewProtectedPaths: requireBoolean(
+      policy.manualReviewProtectedPaths,
+      `${TARGET_MANIFEST_FILENAME}.verificationPolicy.manualReviewProtectedPaths`,
+    ),
+  };
 }
 
 function parseIndexingConfig(value: unknown, warnings: string[]): IndexingConfig {
@@ -112,7 +166,7 @@ export function parseTargetManifest(content: string): ParsedTargetManifest {
   const warnings: string[] = [];
   warnUnknownKeys(
     root,
-    ["schemaVersion", "repository", "goals", "requiredChecks", "protectedPaths", "reviewPolicy", "schedule", "indexing"],
+    ["schemaVersion", "repository", "goals", "requiredChecks", "protectedPaths", "reviewPolicy", "verificationPolicy", "schedule", "indexing"],
     TARGET_MANIFEST_FILENAME,
     warnings,
   );
@@ -137,6 +191,7 @@ export function parseTargetManifest(content: string): ParsedTargetManifest {
   warnUnknownKeys(schedule, ["mode"], `${TARGET_MANIFEST_FILENAME}.schedule`, warnings);
   if (schedule.mode !== "manual") throw new Error(`${TARGET_MANIFEST_FILENAME}.schedule.mode must be "manual"`);
   const indexing = root.indexing === undefined ? undefined : parseIndexingConfig(root.indexing, warnings);
+  const verificationPolicy = root.verificationPolicy === undefined ? undefined : parseVerificationPolicy(root.verificationPolicy, warnings);
 
   return {
     manifest: {
@@ -155,6 +210,7 @@ export function parseTargetManifest(content: string): ParsedTargetManifest {
         ),
         humanApprovalRequired: reviewPolicy.humanApprovalRequired,
       },
+      ...(verificationPolicy ? { verificationPolicy } : {}),
       schedule: { mode: "manual" },
       ...(indexing ? { indexing } : {}),
     },

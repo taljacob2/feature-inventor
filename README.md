@@ -99,6 +99,15 @@ Add `--json` for machine-readable output (same data, no section headers).
   "requiredChecks": ["npm test", "npm run build"],
   "protectedPaths": [".github/workflows/**"],
   "reviewPolicy": { "maxFilesChanged": 12, "humanApprovalRequired": true },
+  "verificationPolicy": {
+    "riskTagChecks": {
+      "lifecycle-state": ["npm run lifecycle"],
+      "verification-evidence": ["npm run verify-artifacts"]
+    },
+    "protectedPathChecks": ["npm run protected-review"],
+    "manualReviewRiskTags": ["external-runtime", "finalization-gate"],
+    "manualReviewProtectedPaths": true
+  },
   "schedule": { "mode": "manual" },
   "indexing": {
     "enabled": true,
@@ -109,6 +118,8 @@ Add `--json` for machine-readable output (same data, no section headers).
   }
 }
 ```
+
+`verificationPolicy` is optional and fully operator-owned. A proposal uses it only after validating the curated feature registry. It maps **validated risk tags** and matched declared protected paths to additional required-check names, and records any explicit reviewer-attention reasons. The original `requiredChecks` remain first and authoritative; the system never invents a command, modifies source scope, or removes a required check. If the policy is absent, existing proposal behavior is unchanged.
 
 Run `feature-inventor doctor` before planning or launching a run. Unknown manifest fields are reported as warnings rather than silently ignored. The optional `indexing` section sets local repository-intelligence policy. Its Git-history window is maintenance evidence only; it is not a measure of runtime or user activity. Manifest creation will move to `feature-inventor init` in a later remediation batch; until then, copy the documented shape above and adapt it for the target repository.
 

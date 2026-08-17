@@ -40,8 +40,14 @@ const MANIFEST = JSON.stringify({
   repository: { url: "https://github.com/example/context-provenance.git", defaultBranch: "master" },
   goals: ["Exercise provenance"],
   requiredChecks: ["npm test"],
-  protectedPaths: [],
+  protectedPaths: ["src/**"],
   reviewPolicy: { maxFilesChanged: 10, humanApprovalRequired: true },
+  verificationPolicy: {
+    riskTagChecks: { "lifecycle-state": ["npm run lifecycle"] },
+    protectedPathChecks: ["npm run protected"],
+    manualReviewRiskTags: ["lifecycle-state"],
+    manualReviewProtectedPaths: true,
+  },
   schedule: { mode: "manual" },
   indexing: DEFAULT_INDEXING_CONFIG,
 }, null, 2);
@@ -94,6 +100,13 @@ describe("proposal context-pack provenance", () => {
       estimatedTokens: contextData.pack.estimatedTokens,
     });
     expect(proposal.contextPack?.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(proposal.riskVerification).toMatchObject({
+      policyApplied: true,
+      derivedRequiredChecks: ["npm run lifecycle", "npm run protected"],
+      requiredChecks: ["npm test", "npm run lifecycle", "npm run protected"],
+      manualReviewRequired: true,
+      classification: { riskTags: ["lifecycle-state"] },
+    });
     expect(existsSync(proposalData.journalPath)).toBe(true);
   });
 });

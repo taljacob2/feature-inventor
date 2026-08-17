@@ -14,6 +14,17 @@
     "maxFilesChanged": 12,
     "humanApprovalRequired": true
   },
+  "verificationPolicy": {
+    "riskTagChecks": {
+      "lifecycle-state": ["npm test", "npm run build"],
+      "immutable-artifact": ["npm test"],
+      "verification-evidence": ["npm test"],
+      "finalization-gate": ["npm run build"]
+    },
+    "protectedPathChecks": ["npm run build"],
+    "manualReviewRiskTags": ["external-runtime", "governance-policy", "finalization-gate"],
+    "manualReviewProtectedPaths": true
+  },
   "schedule": { "mode": "manual" },
   "indexing": {
     "enabled": true,
