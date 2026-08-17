@@ -357,3 +357,7 @@ scoring/ordering above exists so far — the Implement loop is still strictly
 sequential), and any output mode besides committing straight to the branch
 (`args.outputMode` accepts other values but errors out rather than
 half-implementing them — see `ROADMAP.md`).
+
+## Developer documentation
+
+Developers adding or maintaining an execution engine should read the [Runtime Adapter Implementation Guide](docs/runtimes/IMPLEMENTING_ADAPTERS.md). It describes the adapter contract, capability model, lifecycle ownership rules, conformance requirements, and a practical workflow for future runtimes such as Codex.
