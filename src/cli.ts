@@ -58,6 +58,16 @@ import {
   parseRunProposal,
   serializeRunProposal,
 } from "./run-proposal.js";
+import {
+  RUN_APPROVAL_FILENAME,
+  approvalDigest,
+  assertRunApprovalMatchesProposal,
+  createRunApproval,
+  parseRunApproval,
+  requiresHumanApproval,
+  serializeRunApproval,
+  type RunApproval,
+} from "./run-approval.js";
 import { assertProposalMatchesEnvironment } from "./proposal-execution.js";
 import {
   getManusTaskSnapshot,
@@ -154,7 +164,14 @@ function readOptionalFile(repoRoot: string, filename: string): string | null {
 /** How many Next-section titles to preview when the Now section is empty. */
 const NEXT_PREVIEW_LIMIT = 3;
 
+export interface ApprovalStatus {
+  state: "not-required" | "pending" | "approved" | "invalid";
+  reviewer: string | null;
+  approvedAt: string | null;
+}
+
 export interface GovernedRunStatus extends RunJournalSummary {
+  approval: ApprovalStatus;
   reviewReadiness: "pending" | "blocked" | "ready-to-finalize" | null;
   scheduledRuntime: ScheduledRuntime | null;
 }
@@ -182,6 +199,23 @@ export interface StatusData {
   governedRuns: GovernedRunStatus[];
 }
 
+function getApprovalStatus(repoRoot: string, runId: string, events: ReturnType<typeof parseRunJournalEvents>): ApprovalStatus {
+  try {
+    const proposalContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_PROPOSAL_FILENAME));
+    if (proposalContent === null) return { state: "not-required", reviewer: null, approvedAt: null };
+    const proposal = parseRunProposal(proposalContent);
+    if (!requiresHumanApproval(proposal)) return { state: "not-required", reviewer: null, approvedAt: null };
+    const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_APPROVAL_FILENAME));
+    if (content === null) return { state: "pending", reviewer: null, approvedAt: null };
+    const approval = parseRunApproval(content);
+    assertRunApprovalMatchesProposal(approval, proposal);
+    if (!approvalEventMatches(events, approval)) return { state: "invalid", reviewer: approval.reviewer, approvedAt: approval.approvedAt };
+    return { state: "approved", reviewer: approval.reviewer, approvedAt: approval.approvedAt };
+  } catch {
+    return { state: "invalid", reviewer: null, approvedAt: null };
+  }
+}
+
 /** Returns the newest journal summaries without mutating run artifacts. */
 export function getGovernedRunSummaries(repoRoot: string): GovernedRunStatus[] {
   const runsRoot = join(repoRoot, RUNS_DIRECTORY);
@@ -191,6 +225,7 @@ export function getGovernedRunSummaries(repoRoot: string): GovernedRunStatus[] {
       .filter((entry) => entry.isDirectory())
       .map((entry) => {
         const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, entry.name, RUN_JOURNAL_FILENAME));
+        const events = content ? parseRunJournalEvents(content) : [];
         const reviewContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, entry.name, REVIEW_PACKET_FILENAME));
         const handoffContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, entry.name, SCHEDULE_HANDOFF_FILENAME));
         let reviewReadiness: GovernedRunStatus["reviewReadiness"] = null;
@@ -212,7 +247,7 @@ export function getGovernedRunSummaries(repoRoot: string): GovernedRunStatus[] {
             scheduledRuntime = null;
           }
         }
-        return { ...summarizeRunJournal(entry.name, content ? parseRunJournalEvents(content) : []), reviewReadiness, scheduledRuntime };
+        return { ...summarizeRunJournal(entry.name, events), approval: getApprovalStatus(repoRoot, entry.name, events), reviewReadiness, scheduledRuntime };
       })
       .filter((summary) => summary.eventCount > 0)
       .sort((left, right) => (right.startedAt ?? "").localeCompare(left.startedAt ?? ""));
@@ -750,12 +785,14 @@ export function runJournal(repoRoot: string, args: string[]): void {
   if (content === null) throw new Error(`No journal found for ${runId}`);
   const events = parseRunJournalEvents(content);
   const summary = summarizeRunJournal(runId, events);
+  const approval = getApprovalStatus(repoRoot, runId, events);
   if (args.includes("--json")) {
-    console.log(JSON.stringify({ summary, events }, null, 2));
+    console.log(JSON.stringify({ summary, approval, events }, null, 2));
     return;
   }
   console.log(`Run journal: ${runId}`);
   console.log(`Status: ${summary.status}; ${summary.eventCount} event(s)`);
+  console.log(`Approval: ${approval.state}${approval.reviewer ? ` by ${approval.reviewer}` : ""}`);
   for (const event of events) console.log(`  ${event.timestamp} ${event.type}`);
 }
 
@@ -833,6 +870,7 @@ function getRunArtifactPaths(repoRoot: string, runId: string) {
   const runDirectory = join(repoRoot, RUNS_DIRECTORY, runId);
   return {
     proposalPath: join(runDirectory, RUN_PROPOSAL_FILENAME),
+    approvalPath: join(runDirectory, RUN_APPROVAL_FILENAME),
     journalPath: join(runDirectory, RUN_JOURNAL_FILENAME),
     outcomePath: join(runDirectory, TASK_OUTCOME_FILENAME),
     verificationPath: join(runDirectory, VERIFICATION_EVIDENCE_FILENAME),
@@ -853,6 +891,58 @@ function loadJournalForRun(repoRoot: string, runId: string) {
   const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME));
   if (content === null) throw new Error(`No journal found for ${runId}`);
   return { content, events: parseRunJournalEvents(content) };
+}
+
+function approvalEventMatches(events: ReturnType<typeof parseRunJournalEvents>, approval: RunApproval): boolean {
+  const digest = approvalDigest(approval);
+  return events.some((event) => event.type === "approval-recorded" && event.payload.approvalDigest === digest);
+}
+
+/** Loads a reviewer-attested artifact only when the frozen proposal requires approval before execution. */
+function loadApprovalForLaunch(repoRoot: string, runId: string, proposal: ReturnType<typeof loadProposalForRun>, events: ReturnType<typeof parseRunJournalEvents>): RunApproval | undefined {
+  if (!requiresHumanApproval(proposal)) return undefined;
+  const approvalPath = join(repoRoot, RUNS_DIRECTORY, runId, RUN_APPROVAL_FILENAME);
+  const content = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_APPROVAL_FILENAME));
+  if (content === null) {
+    throw new Error(`Human approval is required before launching ${runId}; review the proposal and run \`feature-inventor approve ${runId} --reviewer NAME --note TEXT\`.`);
+  }
+  const approval = parseRunApproval(content);
+  assertRunApprovalMatchesProposal(approval, proposal);
+  if (!approvalEventMatches(events, approval)) {
+    throw new Error(`Approval artifact exists but is not recorded in the append-only journal: ${approvalPath}`);
+  }
+  return approval;
+}
+
+/** Records one human reviewer decision tied to immutable proposal identity before any protected launch. */
+export function runApprove(repoRoot: string, args: string[]): void {
+  const runId = parseRunIdArgument("approve", args);
+  const reviewer = optionValue(args, "--reviewer");
+  const note = optionValue(args, "--note");
+  if (!reviewer || !note) throw new Error("Usage: feature-inventor approve RUN_ID --reviewer NAME --note TEXT");
+  const proposal = loadProposalForRun(repoRoot, runId);
+  const { content: journalContent, events } = loadJournalForRun(repoRoot, runId);
+  const approvalPath = join(repoRoot, RUNS_DIRECTORY, runId, RUN_APPROVAL_FILENAME);
+  const existing = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_APPROVAL_FILENAME));
+  const approval = existing === null
+    ? createRunApproval({ proposal, reviewer, note, approvedAt: new Date().toISOString() })
+    : parseRunApproval(existing);
+  assertRunApprovalMatchesProposal(approval, proposal);
+  const digest = approvalDigest(approval);
+  if (approvalEventMatches(events, approval)) {
+    throw new Error(`Approval is already recorded for ${runId}; create a new proposal if the reviewed scope or policy changes`);
+  }
+  const event = createRunJournalEvent(runId, "approval-recorded", approval.approvedAt, {
+    reviewer: approval.reviewer,
+    approvalPath: join(RUNS_DIRECTORY, runId, RUN_APPROVAL_FILENAME),
+    approvalDigest: digest,
+    required: requiresHumanApproval(proposal),
+  });
+  assertLegalRunTransition(events, event);
+  if (existing === null) writeFileSync(approvalPath, serializeRunApproval(approval), "utf8");
+  writeFileSync(journalPathForRun(repoRoot, runId), appendRunJournalEvents(journalContent, [event]), "utf8");
+  const data = { runId, approvalPath, approval, requiredBeforeLaunch: requiresHumanApproval(proposal), journalEventRecorded: true };
+  console.log(args.includes("--json") ? JSON.stringify(data, null, 2) : `Recorded human approval for ${runId}: ${approvalPath}`);
 }
 
 /** Captures the latest passive external task outcome into a durable local artifact. */
@@ -971,6 +1061,7 @@ export function runFinalize(repoRoot: string, args: string[]): void {
   const reviewContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, REVIEW_PACKET_FILENAME));
   if (reviewContent === null) throw new Error(`No review packet found for ${runId}; run \`feature-inventor review ${runId}\` first`);
   const proposal = loadProposalForRun(repoRoot, runId);
+  loadApprovalForLaunch(repoRoot, runId, proposal, events);
   const runtimeResultContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUNTIME_RESULT_FILENAME));
   if (runtimeResultContent === null) throw new Error(`No runtime result found for ${runId}; capture the completed task result before finalizing`);
   const runtimeResult = parseRuntimeResultFile(runtimeResultContent);
@@ -1033,12 +1124,14 @@ export async function runRuntime(repoRoot: string, args: string[]): Promise<void
     readGitValue(repoRoot, ["remote", "get-url", "origin"]),
     readGitValue(repoRoot, ["rev-parse", "--verify", `${proposal.target.defaultBranch}^{commit}`]),
   ]);
+  const approval = loadApprovalForLaunch(repoRoot, runId, proposal, events);
   const registry = createBuiltInRuntimeRegistry();
   const adapter = registry.get(runtimeId);
   const launch = await launchGovernedRun({
     adapter,
     repoRoot,
     proposal,
+    approval,
     environment: { repositoryUrl, baseCommit },
     allowRemotePush: args.includes("--allow-remote-push"),
     options: {
@@ -1073,9 +1166,6 @@ export async function runManus(repoRoot: string, args: string[]): Promise<void> 
   if (!runId || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(runId)) {
     throw new Error("manus run requires --run RUN_ID from `feature-inventor propose`");
   }
-  const apiKey = process.env.MANUS_API_KEY;
-  if (!apiKey) throw new Error("MANUS_API_KEY is required; set it before running `feature-inventor manus run`");
-
   const proposalPath = join(repoRoot, RUNS_DIRECTORY, runId, RUN_PROPOSAL_FILENAME);
   const journalPath = join(repoRoot, RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME);
   const proposalContent = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_PROPOSAL_FILENAME));
@@ -1094,6 +1184,9 @@ export async function runManus(repoRoot: string, args: string[]): Promise<void> 
   assertProposalMatchesEnvironment(proposal, { repositoryUrl: repoUrl, baseCommit });
 
   const events = parseRunJournalEvents(journalContent);
+  loadApprovalForLaunch(repoRoot, runId, proposal, events);
+  const apiKey = process.env.MANUS_API_KEY;
+  if (!apiKey) throw new Error("MANUS_API_KEY is required; set it before running `feature-inventor manus run`");
   const timestamp = new Date().toISOString();
   const createdEvent = createRunJournalEvent(runId, "task-created", timestamp, { pending: true });
   assertLegalRunTransition(events, createdEvent);
@@ -1146,6 +1239,8 @@ export async function runClaude(repoRoot: string, args: string[]): Promise<void>
   ]);
   if (repoUrl === null || baseCommit === null) throw new Error("Could not resolve the local Git origin and configured default-branch commit");
   assertProposalMatchesEnvironment(proposal, { repositoryUrl: repoUrl, baseCommit });
+  const approval = loadApprovalForLaunch(repoRoot, runId, proposal, events);
+  void approval;
 
   const append = (event: ReturnType<typeof createRunJournalEvent>) => {
     assertLegalRunTransition(events, event);
@@ -1219,11 +1314,14 @@ export function formatOverview(data: StatusData): string {
   const activeQueue = data.nowItems.length > 0 ? data.nowItems : data.nextPreview;
   const readyForReview = data.governedRuns.find((run) => run.reviewReadiness === "ready-to-finalize");
   const blockedRun = data.governedRuns.find((run) => run.reviewReadiness === "blocked");
+  const awaitingApproval = data.governedRuns.find((run) => run.approval.state === "pending" || run.approval.state === "invalid");
   const nextStep = readyForReview
     ? `Review ${readyForReview.runId}: feature-inventor review ${readyForReview.runId}`
     : blockedRun
       ? `Inspect blocked run ${blockedRun.runId}: feature-inventor review ${blockedRun.runId}`
-      : activeQueue.length > 0
+      : awaitingApproval
+        ? `Review and approve ${awaitingApproval.runId}: feature-inventor approve ${awaitingApproval.runId} --reviewer NAME --note TEXT`
+        : activeQueue.length > 0
         ? "Create a governed proposal: feature-inventor propose"
         : "Inspect approved candidates: feature-inventor plan";
   const lines = [
@@ -1236,8 +1334,9 @@ export function formatOverview(data: StatusData): string {
     `GOVERNED RUNS (${data.governedRuns.length})`,
     ...(data.governedRuns.length > 0
       ? data.governedRuns.slice(0, 3).map((run) => {
+          const approval = run.approval.state === "not-required" ? "" : `; approval ${run.approval.state}`;
           const review = run.reviewReadiness ? `; review ${run.reviewReadiness}` : "";
-          return `  - ${run.runId}: ${run.status}${review}`;
+          return `  - ${run.runId}: ${run.status}${approval}${review}`;
         })
       : ["  (none recorded yet)"]),
     "",
@@ -1288,9 +1387,10 @@ export function printStatus(repoRoot: string, options: { json?: boolean } = {}):
   if (governedRuns.length > 0) {
     console.log("Governed runs:");
     for (const run of governedRuns) {
+      const approval = run.approval.state === "not-required" ? "" : `, approval ${run.approval.state}${run.approval.reviewer ? ` by ${run.approval.reviewer}` : ""}`;
       const review = run.reviewReadiness ? `, review ${run.reviewReadiness}` : "";
       const scheduled = run.scheduledRuntime ? `, handoff ${run.scheduledRuntime}` : "";
-      console.log(`  ${run.runId}: ${run.status}${review}${scheduled}, ${run.eventCount} event(s), latest ${run.latestEvent?.type ?? "(none)"}`);
+      console.log(`  ${run.runId}: ${run.status}${approval}${review}${scheduled}, ${run.eventCount} event(s), latest ${run.latestEvent?.type ?? "(none)"}`);
     }
     console.log("");
   }
@@ -1952,6 +2052,9 @@ export async function runCli(args: string[] = process.argv.slice(2), defaultCwd:
       break;
     case "propose":
       await runPropose(repoRoot, parseProposeOptions(rest));
+      break;
+    case "approve":
+      runApprove(repoRoot, rest);
       break;
     case "journal":
       runJournal(repoRoot, rest);

@@ -12,6 +12,7 @@ This file is the short entry point for developers and execution runtimes. It doe
 | Install and initialize a target repository | [docs/cli/INSTALLATION_AND_ONBOARDING.md](docs/cli/INSTALLATION_AND_ONBOARDING.md), then `feature-inventor init` |
 | Prepare a release artifact or review the guarded public npm path | [RELEASING.md](RELEASING.md), then `npm run release:dry-run` |
 | Orient a new operator without starting work | `feature-inventor overview`, then [docs/cli/COMMAND_INTERFACE.md](docs/cli/COMMAND_INTERFACE.md) |
+| Review and authorize a protected proposal | [docs/cli/HUMAN_REVIEW_GUIDE.md](docs/cli/HUMAN_REVIEW_GUIDE.md), then `feature-inventor approve RUN_ID --reviewer NAME --note TEXT` |
 | Check a target repository before governed work | `feature-inventor doctor` and [src/doctor.ts](src/doctor.ts) |
 | See the operator-owned target contract | [feature-inventor.target.json](feature-inventor.target.json) and [src/target-manifest.ts](src/target-manifest.ts) |
 | Find a named product capability | [docs/indexing/features.yml](docs/indexing/features.yml) |
@@ -30,7 +31,7 @@ This file is the short entry point for developers and execution runtimes. It doe
 |---|---|---|---|
 | Target initialization, contract, and preflight | `src/cli.ts#runCli` | `src/cli/init.ts`, `src/init.ts`, `src/target-manifest.ts`, `src/doctor.ts` | `src/cli/init.test.ts`, `src/target-manifest.test.ts`, `src/doctor.test.ts` |
 | Proposal creation | `src/cli.ts#runPropose` | `src/automatic-proposal-preparation.ts`, `src/run-proposal.ts`, `src/context-pack-provenance.ts`, `src/risk-verification-policy.ts`, `src/run-journal.ts`, `src/run-plan.ts` | `src/automatic-proposal-preparation.test.ts`, `src/run-proposal.test.ts`, `src/risk-verification-policy.test.ts`, `src/proposal-context-provenance.test.ts`, `src/governed-runs.test.ts` |
-| Governed runtime launch | `src/cli.ts#runRuntime` | `src/core/governed-run-service.ts`, `src/runtimes/registry.ts`, `src/runtimes/types.ts` | `src/runtimes/registry.test.ts`, [adapter guide](docs/runtimes/IMPLEMENTING_ADAPTERS.md) |
+| Human approval and governed runtime launch | `src/cli.ts#runApprove`, `src/cli.ts#runRuntime` | `src/run-approval.ts`, `src/core/governed-run-service.ts`, `src/runtimes/registry.ts`, `src/runtimes/types.ts` | `src/run-approval.test.ts`, `src/runtimes/registry.test.ts`, [review guide](docs/cli/HUMAN_REVIEW_GUIDE.md) |
 | Passive observation and recovery | `src/cli.ts#runWatch` | `src/core/governed-run-service.ts`, `src/runtimes/manus.ts`, `src/run-journal.ts` | `src/runtimes/manus.test.ts`, `src/runtimes/registry.test.ts` |
 | Runtime result, verification, and review | `src/cli.ts#runCapture`, `src/cli.ts#runReview` | `src/runtime-result.ts`, `src/risk-verification-policy.ts`, `src/review-packet.ts` | `src/runtime-result.test.ts`, `src/risk-verification-policy.test.ts`, `src/review-packet.test.ts` |
 | Runtime adapter extension | `src/runtimes/types.ts#RuntimeAdapter` | `src/runtimes/registry.ts`, `src/runtimes/builtins.ts` | `src/runtimes/registry.test.ts`, [adapter guide](docs/runtimes/IMPLEMENTING_ADAPTERS.md) |
@@ -42,8 +43,8 @@ The curated registry contains the machine-validated version of these flow defini
 
 | Area | Responsibility | Primary paths |
 |---|---|---|
-| CLI and operator workflow | Parses commands, provides guided and scriptable initialization, generates shell completions from one shared command vocabulary, exposes stable human/JSON/plain presentation controls, and routes non-mutating inspection, governed proposal, execution, and review operations. | `src/cli.ts`, `src/cli/init.ts`, `src/init.ts`, `src/cli/command-spec.ts`, `src/cli/completion.ts`, `src/cli/terminal.ts`, `src/cli/help.ts`, [command guide](docs/cli/COMMAND_INTERFACE.md), [installation guide](docs/cli/INSTALLATION_AND_ONBOARDING.md) |
-| Governance artifacts | Defines immutable proposals, append-only journals, structured results, and review packets. | `src/run-proposal.ts`, `src/run-journal.ts`, `src/runtime-result.ts`, `src/review-packet.ts` |
+| CLI and operator workflow | Parses commands, provides guided and scriptable initialization, generates shell completions from one shared command vocabulary, exposes stable human/JSON/plain presentation controls, and routes non-mutating inspection, approval, governed proposal, execution, and review operations. | `src/cli.ts`, `src/cli/init.ts`, `src/init.ts`, `src/cli/command-spec.ts`, `src/cli/completion.ts`, `src/cli/terminal.ts`, `src/cli/help.ts`, [command guide](docs/cli/COMMAND_INTERFACE.md), [review guide](docs/cli/HUMAN_REVIEW_GUIDE.md), [installation guide](docs/cli/INSTALLATION_AND_ONBOARDING.md) |
+| Governance artifacts | Defines immutable proposals, proposal-bound reviewer approvals, append-only journals, structured results, and review packets. | `src/run-proposal.ts`, `src/run-approval.ts`, `src/run-journal.ts`, `src/runtime-result.ts`, `src/review-packet.ts` |
 | Runtime integration | Resolves registered providers and normalizes preflight, launch, and optional observation. | `src/runtimes/`, `src/core/governed-run-service.ts` |
 | Target contract | Validates the repository identity, operator goals, checks, protected paths, review policy, schedule, and index policy. | `src/target-manifest.ts`, `feature-inventor.target.json` |
 | Indexing and context selection | Maintains the curated feature map and later generated, commit-pinned repository snapshots. | `docs/indexing/`, `src/indexing/`, `.feature-inventor/index/` |
@@ -63,7 +64,7 @@ The curated registry contains the machine-validated version of these flow defini
 
 Generated index artifacts belong under `.feature-inventor/index/` and are intentionally local. The directory is ignored by Git because snapshots are derived from an exact checkout and should be rebuilt rather than committed.
 
-The index builder now produces a deterministic file inventory, TypeScript import/export graph, commit-anchored Git history, separate heatmap lenses, a Markdown report, and persisted token-budgeted context packs. Run `feature-inventor index build` only from a clean checkout. Query a single lens with `feature-inventor index heatmap --by reachability|centrality|churn|test-linkage`; these values are evidence categories, not a blended usage score. Build a briefing only from a fresh snapshot with `feature-inventor index context` and exactly one explicit selector. See [docs/indexing/INDEXING.md](docs/indexing/INDEXING.md) for the contract and limitations.
+The index builder now produces a deterministic file inventory, TypeScript, JavaScript, and Svelte-script import/export graph, commit-anchored Git history, separate heatmap lenses, a Markdown report, and persisted token-budgeted context packs. Run `feature-inventor index build` only from a clean checkout. Query a single lens with `feature-inventor index heatmap --by reachability|centrality|churn|test-linkage`; these values are evidence categories, not a blended usage score. Build a briefing only from a fresh snapshot with `feature-inventor index context` and exactly one explicit selector. See [docs/indexing/INDEXING.md](docs/indexing/INDEXING.md) for the contract and limitations.
 
 ## Reading Order for Feature Work
 

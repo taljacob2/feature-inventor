@@ -49,6 +49,7 @@ describe("governed run views", () => {
         latestEvent: expect.any(Object),
         startedAt: "2026-08-17T12:00:00.000Z",
         finalizedAt: "2026-08-17T12:00:02.000Z",
+        approval: { state: "not-required", reviewer: null, approvedAt: null },
         reviewReadiness: null,
         scheduledRuntime: null,
       },
@@ -62,6 +63,7 @@ describe("governed run views", () => {
     expect(log.mock.calls.map(([line]) => line)).toEqual([
       `Run journal: ${RUN_ID}`,
       "Status: finalized; 3 event(s)",
+      "Approval: not-required",
       "  2026-08-17T12:00:00.000Z planned",
       "  2026-08-17T12:00:01.000Z workspace-prepared",
       "  2026-08-17T12:00:02.000Z run-finalized",

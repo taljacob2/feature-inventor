@@ -6,6 +6,7 @@ import { runFinalize, runReview, runVerify } from "./cli.js";
 import { DEFAULT_RUN_POLICY } from "./engine/contracts.js";
 import { buildRunPlan } from "./run-plan.js";
 import { RUN_PROPOSAL_FILENAME, RUNS_DIRECTORY, createRunProposal, serializeRunProposal } from "./run-proposal.js";
+import { RUN_APPROVAL_FILENAME, approvalDigest, createRunApproval, serializeRunApproval } from "./run-approval.js";
 import { RUN_JOURNAL_FILENAME, appendRunJournalEvents, createRunJournalEvent, parseRunJournalEvents, summarizeRunJournal } from "./run-journal.js";
 import { TASK_OUTCOME_FILENAME, createTaskOutcome, serializeTaskOutcome } from "./review-packet.js";
 import { RUNTIME_RESULT_FILENAME, parseRuntimeResult, serializeRuntimeResult } from "./runtime-result.js";
@@ -36,10 +37,21 @@ function makeRepo(): string {
     plan: buildRunPlan("# Roadmap\n\n## Now\n- [ ] Safe feature\n", DEFAULT_RUN_POLICY),
   });
   writeFileSync(join(runDirectory, RUN_PROPOSAL_FILENAME), serializeRunProposal(proposal));
+  const approval = createRunApproval({
+    proposal,
+    reviewer: "maintainer@example.test",
+    note: "Reviewed before the runtime launch.",
+    approvedAt: "2026-08-17T00:00:00.500Z",
+  });
+  writeFileSync(join(runDirectory, RUN_APPROVAL_FILENAME), serializeRunApproval(approval));
   writeFileSync(
     join(runDirectory, RUN_JOURNAL_FILENAME),
     appendRunJournalEvents("", [
       createRunJournalEvent(RUN_ID, "planned", "2026-08-17T00:00:00.000Z"),
+      createRunJournalEvent(RUN_ID, "approval-recorded", "2026-08-17T00:00:00.500Z", {
+        reviewer: approval.reviewer,
+        approvalDigest: approvalDigest(approval),
+      }),
       createRunJournalEvent(RUN_ID, "task-created", "2026-08-17T00:00:01.000Z", { taskId: "task-1" }),
       createRunJournalEvent(RUN_ID, "task-completed", "2026-08-17T00:00:02.000Z", { taskId: "task-1", sourceEventId: "evt-stopped" }),
     ]),
