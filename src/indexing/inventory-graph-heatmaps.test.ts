@@ -123,6 +123,7 @@ describe("inventory, TypeScript graph, and heatmap lenses", () => {
     expect(entry?.evidence).toEqual({ entryPoint: true, featureIds: ["sample"] });
     expect(rowsForHeatmapLens(heatmaps.rows, "churn", 1)[0]?.path).toBe("src/entry.ts");
     expect(rowsForHeatmapLens(heatmaps.rows, "centrality", 1)[0]?.path).toBe("src/entry.ts");
+    expect(heatmaps.limitations.join(" ")).toContain("TypeScript, JavaScript, and Svelte-script");
     expect(heatmaps.limitations.join(" ")).toContain("not runtime or user usage");
   });
 

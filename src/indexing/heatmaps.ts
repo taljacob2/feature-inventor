@@ -78,7 +78,7 @@ export function buildHeatmaps(graph: ModuleGraph, history: HistoricalActivity, r
     rows,
     limitations: [
       "Reachability marks only explicitly declared feature entry points; it is not a full call graph.",
-      "Centrality counts resolved indexed TypeScript import and export relationships; external and unresolved imports are excluded.",
+      "Centrality counts resolved indexed TypeScript, JavaScript, and Svelte-script import and export relationships; external and unresolved imports are excluded.",
       "Churn is Git commit and changed-line activity anchored to the indexed commit; it is not runtime or user usage.",
       "Test linkage counts direct imports from indexed test files; it is not test coverage.",
       "No target application runtime telemetry is collected or represented.",
