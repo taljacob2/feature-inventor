@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -42,6 +42,33 @@ describe("initialization core", () => {
     expect(manifest.schedule.mode).toBe("manual");
     expect(manifest.indexing?.enabled).toBe(true);
     expect(parseTargetManifest(JSON.stringify(manifest)).manifest).toEqual(manifest);
+  });
+
+  it("creates an empty roadmap scaffold and preserves later operator edits", () => {
+    const root = createTemporaryRepository();
+    const initial = initializeTargetManifest({
+      repoRoot: root,
+      repositoryUrl: "https://github.com/example/demo.git",
+      defaultBranch: "main",
+      goal: "Initial goal",
+      requiredCheck: "npm test",
+    });
+
+    expect(initial.roadmapCreated).toBe(true);
+    expect(readFileSync(initial.roadmapPath, "utf8")).toContain("## Now");
+    writeFileSync(initial.roadmapPath, "# Operator roadmap\n\n## Now\n\n- [ ] Preserve this candidate\n", "utf8");
+
+    const refreshed = initializeTargetManifest({
+      repoRoot: root,
+      repositoryUrl: "https://github.com/example/demo.git",
+      defaultBranch: "main",
+      goal: "Replacement goal",
+      requiredCheck: "npm run build",
+      force: true,
+    });
+
+    expect(refreshed.roadmapCreated).toBe(false);
+    expect(readFileSync(refreshed.roadmapPath, "utf8")).toContain("Preserve this candidate");
   });
 
   it("locally ignores generated Feature Inventor artifacts without changing a tracked ignore file", () => {
@@ -132,6 +159,8 @@ describe("init command contract", () => {
 
     expect(result.mode).toBe("guided");
     expect(existsSync(join(root, "feature-inventor.target.json"))).toBe(true);
+    expect(existsSync(join(root, "ROADMAP.md"))).toBe(true);
+    expect(formatInitResult(result)).toContain("Created operator roadmap");
     expect(formatInitResult(result)).toContain("No runtime, proposal, source change, or schedule has been created.");
   });
 
@@ -155,9 +184,11 @@ describe("init command contract", () => {
       "--check", "npm test",
     ], root);
 
-    const output = JSON.parse(String(log.mock.calls[0]![0])) as { mode: string; manifestPath: string };
+    const output = JSON.parse(String(log.mock.calls[0]![0])) as { mode: string; manifestPath: string; roadmapPath: string; roadmapCreated: boolean };
     expect(output.mode).toBe("non-interactive");
     expect(output.manifestPath).toBe(join(root, "feature-inventor.target.json"));
+    expect(output.roadmapPath).toBe(join(root, "ROADMAP.md"));
+    expect(output.roadmapCreated).toBe(true);
   });
 
   it("refuses JSON-guided setup to preserve a clean machine-readable stream", async () => {

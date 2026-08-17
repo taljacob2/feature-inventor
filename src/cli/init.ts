@@ -156,9 +156,11 @@ export function formatInitResult(result: InitCommandResult): string {
   return [
     `${action} local target contract: ${result.manifestPath}`,
     `Setup mode: ${result.mode}`,
+    `${result.roadmapCreated ? "Created" : "Preserved"} operator roadmap: ${result.roadmapPath}`,
     "Configuration is saved. No runtime, proposal, source change, or schedule has been created.",
     "Next safe steps:",
     "  feature-inventor doctor",
+    "  add one reviewed candidate under ROADMAP.md > Now or Next",
     "  feature-inventor overview",
     "  feature-inventor plan",
     "Operator review remains required before any governed execution.",
