@@ -33,8 +33,10 @@ import { runClaudeCodeProposal } from "./claude-runtime.js";
 import { buildDoctorData, formatDoctor } from "./doctor.js";
 import { TARGET_MANIFEST_FILENAME, parseTargetManifest } from "./target-manifest.js";
 import { formatRegistryValidation, validateFeatureRegistryFile } from "./indexing/feature-registry.js";
+import { INDEX_ARTIFACT_FILENAMES, buildIndexSnapshot, readIndexArtifact, readIndexReport } from "./indexing/index-builder.js";
+import { rowsForHeatmapLens } from "./indexing/heatmaps.js";
 import { formatIndexStatus, getIndexStatus } from "./indexing/index-status.js";
-import { DEFAULT_INDEXING_CONFIG, INDEX_ROOT_DOCUMENT_PATH } from "./indexing/types.js";
+import { DEFAULT_INDEXING_CONFIG, INDEX_ROOT_DOCUMENT_PATH, type HeatmapLens, type HeatmapsArtifact } from "./indexing/types.js";
 import {
   RUN_PROPOSAL_FILENAME,
   RUNS_DIRECTORY,
@@ -274,6 +276,16 @@ async function readGitValue(repoRoot: string, args: string[]): Promise<string | 
   }
 }
 
+/** Preserves a successful empty Git response, needed to distinguish a clean status from command failure. */
+async function readGitOutput(repoRoot: string, args: string[]): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", args, { cwd: repoRoot });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
 /** Runs non-mutating target and workspace preflight checks before a governed run. */
 export async function runDoctor(repoRoot: string, options: { json?: boolean } = {}): Promise<void> {
   const manifestContent = readOptionalFile(repoRoot, TARGET_MANIFEST_FILENAME);
@@ -341,7 +353,7 @@ export async function runIndexStatus(repoRoot: string, options: { json?: boolean
   const { manifest, warnings: manifestWarnings } = parseTargetManifest(manifestContent);
   const [targetCommit, porcelain] = await Promise.all([
     readGitValue(repoRoot, ["rev-parse", "HEAD"]),
-    readGitValue(repoRoot, ["status", "--porcelain"]),
+    readGitOutput(repoRoot, ["status", "--porcelain"]),
   ]);
   const status = getIndexStatus(repoRoot, manifest.indexing ?? DEFAULT_INDEXING_CONFIG, targetCommit, porcelain === null ? null : porcelain === "");
   const data = { ...status, manifestWarnings };
@@ -349,12 +361,103 @@ export async function runIndexStatus(repoRoot: string, options: { json?: boolean
   if (status.state === "unavailable") process.exitCode = 1;
 }
 
-/** Dispatches the intentionally small initial index command family. */
-export async function runIndex(repoRoot: string, args: string[]): Promise<void> {
-  if (args[0] !== "status" || args.slice(1).some((arg) => arg !== "--json")) {
-    throw new Error("Usage: feature-inventor index status [--json]");
+async function loadIndexManifestContext(repoRoot: string): Promise<{
+  config: typeof DEFAULT_INDEXING_CONFIG;
+  targetCommit: string;
+  workspaceClean: boolean;
+  manifestWarnings: string[];
+}> {
+  const manifestContent = readOptionalFile(repoRoot, TARGET_MANIFEST_FILENAME);
+  if (manifestContent === null) throw new Error(`${TARGET_MANIFEST_FILENAME} is required before using the index`);
+  const { manifest, warnings: manifestWarnings } = parseTargetManifest(manifestContent);
+  const [targetCommit, porcelain] = await Promise.all([
+    readGitValue(repoRoot, ["rev-parse", "HEAD"]),
+    readGitOutput(repoRoot, ["status", "--porcelain"]),
+  ]);
+  if (targetCommit === null) throw new Error("Could not resolve the current Git commit for the index");
+  if (porcelain === null) throw new Error("Could not determine workspace state for the index");
+  return { config: manifest.indexing ?? DEFAULT_INDEXING_CONFIG, targetCommit, workspaceClean: porcelain === "", manifestWarnings };
+}
+
+/** Builds deterministic local index artifacts only from a clean checkout at its exact current commit. */
+export async function runIndexBuild(repoRoot: string, options: { json?: boolean } = {}): Promise<void> {
+  const context = await loadIndexManifestContext(repoRoot);
+  if (!context.config.enabled) throw new Error("Indexing is disabled by the target manifest");
+  if (!context.workspaceClean) throw new Error("index build requires a clean working tree so generated artifacts match the recorded commit");
+  const result = await buildIndexSnapshot(repoRoot, context.targetCommit, context.config);
+  const data = { snapshotDirectory: result.snapshotDirectory, metadata: result.metadata, report: result.report, manifestWarnings: context.manifestWarnings };
+  console.log(options.json ? JSON.stringify(data, null, 2) : `Built deterministic index snapshot: ${result.snapshotDirectory}`);
+}
+
+function requireReadableSnapshot(repoRoot: string, status: ReturnType<typeof getIndexStatus>) {
+  if (status.snapshotPath === null || status.snapshot === null) {
+    throw new Error("No readable index snapshot is available; run `feature-inventor index build` from a clean checkout first");
   }
-  await runIndexStatus(repoRoot, { json: args.includes("--json") });
+  return status.snapshotPath.slice(0, -"/metadata.json".length);
+}
+
+/** Prints the stored Markdown report for the newest matching or prior-commit local snapshot. */
+export async function runIndexReport(repoRoot: string, options: { json?: boolean } = {}): Promise<void> {
+  const context = await loadIndexManifestContext(repoRoot);
+  const status = getIndexStatus(repoRoot, context.config, context.targetCommit, context.workspaceClean);
+  const snapshotDirectory = requireReadableSnapshot(repoRoot, status);
+  const report = readIndexReport(snapshotDirectory);
+  console.log(options.json ? JSON.stringify({ status, report, manifestWarnings: context.manifestWarnings }, null, 2) : report);
+}
+
+function parseHeatmapLens(value: string | undefined): HeatmapLens {
+  if (value === "reachability" || value === "centrality" || value === "churn" || value === "test-linkage") return value;
+  throw new Error("index heatmap requires --by reachability|centrality|churn|test-linkage");
+}
+
+/** Prints one explicit structural or historical lens from a generated snapshot without blending scores. */
+export async function runIndexHeatmap(repoRoot: string, args: string[]): Promise<void> {
+  const lens = parseHeatmapLens(optionValue(args, "--by"));
+  const limitValue = optionValue(args, "--limit");
+  const limit = limitValue ? parsePositiveInteger(limitValue, "--limit") : 20;
+  const allowed = new Set(["--by", lens, "--limit", ...(limitValue ? [limitValue] : []), "--json"]);
+  if (args.some((arg) => !allowed.has(arg))) {
+    throw new Error("Usage: feature-inventor index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json]");
+  }
+  const context = await loadIndexManifestContext(repoRoot);
+  const status = getIndexStatus(repoRoot, context.config, context.targetCommit, context.workspaceClean);
+  const snapshotDirectory = requireReadableSnapshot(repoRoot, status);
+  const heatmaps = readIndexArtifact<HeatmapsArtifact>(snapshotDirectory, INDEX_ARTIFACT_FILENAMES.heatmaps);
+  const rows = rowsForHeatmapLens(heatmaps.rows, lens, limit);
+  const data = { lens, rows, limitations: heatmaps.limitations, status, manifestWarnings: context.manifestWarnings };
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  console.log(`Heatmap lens: ${lens}`);
+  console.log("Path\tValue\tFan-in\tFan-out\tChanged lines\tTest links");
+  for (const row of rows) {
+    const value = lens === "reachability" ? row.reachability : lens === "centrality" ? row.centrality : lens === "churn" ? row.churnChangedLines : row.testLinks;
+    console.log(`${row.path}\t${value}\t${row.fanIn}\t${row.fanOut}\t${row.churnChangedLines}\t${row.testLinks}`);
+  }
+  console.log(`Limitation: ${heatmaps.limitations.find((item) => item.toLowerCase().startsWith(lens === "churn" ? "churn" : lens === "centrality" ? "centrality" : lens === "reachability" ? "reachability" : "test linkage")) ?? "See generated report."}`);
+}
+
+/** Dispatches snapshot construction, inspection, and explicit heatmap-lens queries. */
+export async function runIndex(repoRoot: string, args: string[]): Promise<void> {
+  const command = args[0];
+  if (command === "status" && args.slice(1).every((arg) => arg === "--json")) {
+    await runIndexStatus(repoRoot, { json: args.includes("--json") });
+    return;
+  }
+  if (command === "build" && args.slice(1).every((arg) => arg === "--json")) {
+    await runIndexBuild(repoRoot, { json: args.includes("--json") });
+    return;
+  }
+  if (command === "report" && args.slice(1).every((arg) => arg === "--json")) {
+    await runIndexReport(repoRoot, { json: args.includes("--json") });
+    return;
+  }
+  if (command === "heatmap") {
+    await runIndexHeatmap(repoRoot, args.slice(1));
+    return;
+  }
+  throw new Error("Usage: feature-inventor index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json]");
 }
 
 /** Saves a commit-pinned proposal and its initial journal event without launching an execution runtime. */
@@ -1465,7 +1568,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | docs validate [--json] | index status [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | docs validate [--json] | index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once | --every DURATION ...] | --help | --version]\n" +
   "  daemon execution is retired and fails closed because it used the archived nightly workflow. " +
   "Use `schedule handoff RUN_ID --runtime claude|manus` to write an exact proposal-pinned handoff instead.\n" +

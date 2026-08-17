@@ -95,3 +95,119 @@ export interface RegistryValidation {
   diagnostics: RegistryDiagnostic[];
   valid: boolean;
 }
+
+export type RepositoryFileKind = "source" | "test" | "documentation" | "configuration" | "other";
+
+export interface RepositoryInventoryFile {
+  path: string;
+  kind: RepositoryFileKind;
+  language: string | null;
+  bytes: number;
+}
+
+export interface RepositoryInventory {
+  generatedForCommit: string;
+  files: RepositoryInventoryFile[];
+  totals: {
+    files: number;
+    sourceFiles: number;
+    testFiles: number;
+    documentationFiles: number;
+    configurationFiles: number;
+    bytes: number;
+  };
+  ignoredDirectories: string[];
+}
+
+export type ModuleEdgeKind = "import" | "export-from" | "dynamic-import";
+
+export interface ModuleGraphNode {
+  path: string;
+  language: "typescript";
+  exports: string[];
+  isTest: boolean;
+}
+
+export interface ModuleGraphEdge {
+  source: string;
+  target: string | null;
+  specifier: string;
+  kind: ModuleEdgeKind;
+  /** True when the import could not be resolved to an indexed repository module. */
+  external: boolean;
+}
+
+export interface ModuleGraph {
+  generatedForCommit: string;
+  language: "typescript";
+  nodes: ModuleGraphNode[];
+  edges: ModuleGraphEdge[];
+  warnings: string[];
+}
+
+export interface HistoricalFileActivity {
+  path: string;
+  commits: number;
+  additions: number;
+  deletions: number;
+  changedLines: number;
+}
+
+export interface HistoricalActivity {
+  generatedForCommit: string;
+  historyDays: number;
+  commitsScanned: number;
+  files: HistoricalFileActivity[];
+  complete: boolean;
+  warnings: string[];
+}
+
+export type HeatmapLens = "reachability" | "centrality" | "churn" | "test-linkage";
+
+export interface HeatmapRow {
+  path: string;
+  reachability: number;
+  fanIn: number;
+  fanOut: number;
+  centrality: number;
+  churnCommits: number;
+  churnChangedLines: number;
+  testLinks: number;
+  evidence: {
+    entryPoint: boolean;
+    featureIds: string[];
+  };
+}
+
+export interface HeatmapsArtifact {
+  generatedForCommit: string;
+  historyDays: number;
+  rows: HeatmapRow[];
+  limitations: string[];
+}
+
+export interface IndexReport {
+  generatedForCommit: string;
+  inventory: RepositoryInventory["totals"];
+  graph: {
+    nodes: number;
+    edges: number;
+    unresolvedEdges: number;
+  };
+  history: {
+    commitsScanned: number;
+    filesWithActivity: number;
+  };
+  topByLens: Record<HeatmapLens, HeatmapRow[]>;
+  limitations: string[];
+}
+
+export interface IndexBuildResult {
+  metadata: IndexSnapshotMetadata;
+  inventory: RepositoryInventory;
+  graph: ModuleGraph;
+  history: HistoricalActivity;
+  heatmaps: HeatmapsArtifact;
+  report: IndexReport;
+  snapshotDirectory: string;
+}
