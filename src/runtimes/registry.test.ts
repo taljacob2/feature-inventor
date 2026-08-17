@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { launchGovernedRun } from "../core/governed-run-service.js";
+import { launchGovernedRun, observeGovernedRun } from "../core/governed-run-service.js";
 import type { RunProposal } from "../run-proposal.js";
 import { RuntimeRegistry } from "./registry.js";
 import type { RuntimeAdapter } from "./types.js";
@@ -86,5 +86,30 @@ describe("generic adapter conformance", () => {
       proposal,
       environment: { repositoryUrl: "https://github.com/example/repo", baseCommit: "abcdef0" },
     })).rejects.toThrow("isolated-worktree");
+  });
+
+  it("converts a passive adapter observation into a normalized task lifecycle update", async () => {
+    const adapter = fakeAdapter("async");
+    adapter.capabilities.asynchronousObservation = true;
+    adapter.observe = async () => ({
+      runtimeId: "async",
+      handleId: "task-1",
+      state: "awaiting-review",
+      observedAt: "2026-08-17T00:00:02.000Z",
+      sourceEventId: "event-1",
+      message: "Task stopped",
+      runtimeResult: null,
+      metadata: { taskId: "task-1" },
+    });
+    const result = await observeGovernedRun({
+      adapter,
+      repoRoot: "/repo",
+      proposal,
+      handle: { runtimeId: "async", kind: "external-task", id: "task-1", metadata: {} },
+    });
+    expect(result.update).toEqual({
+      type: "task-completed",
+      payload: expect.objectContaining({ runtime: "async", sourceEventId: "event-1" }),
+    });
   });
 });
