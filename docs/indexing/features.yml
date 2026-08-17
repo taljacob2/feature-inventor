@@ -1,0 +1,204 @@
+version: 1
+features:
+  - id: target-contract
+    name: Target contract and preflight
+    intent: Validate the operator-owned repository contract and local preconditions before governed work begins.
+    entryPoints:
+      - src/cli.ts#runDoctor
+    primaryPaths:
+      - src/target-manifest.ts
+      - src/doctor.ts
+    tests:
+      - src/target-manifest.test.ts
+      - src/doctor.test.ts
+    flows:
+      - target-preflight
+    riskTags:
+      - governance-policy
+      - repository-identity
+
+  - id: governed-run
+    name: Governed runtime execution
+    intent: Launch an approved proposal through a selected runtime adapter and record the lifecycle as append-only evidence.
+    entryPoints:
+      - src/cli.ts#runRuntime
+    primaryPaths:
+      - src/core/governed-run-service.ts
+      - src/run-proposal.ts
+      - src/run-journal.ts
+      - src/runtimes/registry.ts
+      - src/runtimes/types.ts
+    tests:
+      - src/governed-runs.test.ts
+      - src/runtimes/registry.test.ts
+    flows:
+      - governed-run-lifecycle
+    riskTags:
+      - lifecycle-state
+      - external-runtime
+      - immutable-artifact
+
+  - id: runtime-observation
+    name: Passive runtime observation and recovery
+    intent: Observe a recorded external task through its registered adapter without repeating provider-side work or duplicating journal events.
+    entryPoints:
+      - src/cli.ts#runWatch
+    primaryPaths:
+      - src/core/governed-run-service.ts
+      - src/runtimes/manus.ts
+      - src/manus-monitor.ts
+      - src/run-journal.ts
+    tests:
+      - src/runtimes/manus.test.ts
+      - src/runtimes/registry.test.ts
+    flows:
+      - runtime-observation-recovery
+    riskTags:
+      - lifecycle-state
+      - external-runtime
+      - idempotency
+
+  - id: review-evidence
+    name: Runtime evidence and review packet
+    intent: Capture structured runtime evidence, collect required verification outcomes, and generate a review packet before finalization.
+    entryPoints:
+      - src/cli.ts#runCapture
+      - src/cli.ts#runReview
+      - src/cli.ts#runFinalize
+    primaryPaths:
+      - src/runtime-result.ts
+      - src/review-packet.ts
+      - src/run-journal.ts
+    tests:
+      - src/runtime-result.test.ts
+      - src/review-packet.test.ts
+      - src/review-workflow.test.ts
+    flows:
+      - review-evidence-finalization
+    riskTags:
+      - immutable-artifact
+      - verification-evidence
+      - finalization-gate
+
+  - id: runtime-adapters
+    name: Runtime adapter extension
+    intent: Add an AI execution engine behind the generic runtime adapter registry without moving provider-specific behavior into lifecycle orchestration.
+    entryPoints:
+      - src/runtimes/builtins.ts#createBuiltInRuntimeRegistry
+    primaryPaths:
+      - src/runtimes/types.ts
+      - src/runtimes/registry.ts
+      - src/runtimes/builtins.ts
+      - src/core/governed-run-service.ts
+    tests:
+      - src/runtimes/registry.test.ts
+      - src/claude-runtime.test.ts
+      - src/runtimes/manus.test.ts
+    flows:
+      - runtime-adapter-registration
+    riskTags:
+      - provider-boundary
+      - lifecycle-state
+      - external-runtime
+
+  - id: schedule-handoff
+    name: Proposal-pinned scheduler handoff
+    intent: Produce a reviewable command handoff for one approved proposal without starting a scheduler or executing a run.
+    entryPoints:
+      - src/cli.ts#runSchedule
+    primaryPaths:
+      - src/schedule-handoff.ts
+      - src/run-proposal.ts
+      - src/run-journal.ts
+    tests:
+      - src/schedule-handoff.test.ts
+    flows:
+      - schedule-handoff
+    riskTags:
+      - non-executing-handoff
+      - immutable-artifact
+
+flows:
+  - id: target-preflight
+    name: Target contract and preflight
+    startsAt:
+      - src/cli.ts#runDoctor
+    steps:
+      - source: src/cli.ts#runDoctor
+        role: command-dispatch
+      - source: src/target-manifest.ts#parseTargetManifest
+        role: operator-contract-validation
+      - source: src/doctor.ts#buildDoctorData
+        role: preflight-assessment
+
+  - id: governed-run-lifecycle
+    name: Governed runtime lifecycle
+    startsAt:
+      - src/cli.ts#runRuntime
+    steps:
+      - source: src/cli.ts#runRuntime
+        role: command-dispatch
+      - source: src/core/governed-run-service.ts#launchGovernedRun
+        role: lifecycle-orchestration
+      - source: src/runtimes/registry.ts#RuntimeRegistry
+        role: adapter-resolution
+      - source: src/runtimes/types.ts#RuntimeAdapter
+        role: provider-boundary
+      - source: src/run-journal.ts
+        role: append-only-evidence
+
+  - id: runtime-observation-recovery
+    name: Runtime observation and recovery
+    startsAt:
+      - src/cli.ts#runWatch
+    steps:
+      - source: src/cli.ts#runWatch
+        role: command-dispatch
+      - source: src/core/governed-run-service.ts#observeGovernedRun
+        role: lifecycle-orchestration
+      - source: src/runtimes/types.ts#RuntimeAdapter
+        role: provider-observation-boundary
+      - source: src/run-journal.ts
+        role: idempotent-evidence-update
+
+  - id: review-evidence-finalization
+    name: Review evidence and finalization
+    startsAt:
+      - src/cli.ts#runCapture
+      - src/cli.ts#runReview
+      - src/cli.ts#runFinalize
+    steps:
+      - source: src/cli.ts#runCapture
+        role: structured-artifact-capture
+      - source: src/runtime-result.ts
+        role: runtime-result-validation
+      - source: src/review-packet.ts#createReviewPacket
+        role: review-readiness-assessment
+      - source: src/cli.ts#runFinalize
+        role: explicit-finalization-gate
+
+  - id: runtime-adapter-registration
+    name: Runtime adapter registration
+    startsAt:
+      - src/runtimes/builtins.ts#createBuiltInRuntimeRegistry
+    steps:
+      - source: src/runtimes/types.ts#RuntimeAdapter
+        role: adapter-contract
+      - source: src/runtimes/registry.ts#RuntimeRegistry
+        role: registry-contract
+      - source: src/runtimes/builtins.ts#createBuiltInRuntimeRegistry
+        role: built-in-registration
+      - source: src/core/governed-run-service.ts
+        role: shared-governed-orchestration
+
+  - id: schedule-handoff
+    name: Proposal-pinned scheduler handoff
+    startsAt:
+      - src/cli.ts#runSchedule
+    steps:
+      - source: src/cli.ts#runSchedule
+        role: command-dispatch
+      - source: src/schedule-handoff.ts#createScheduleHandoff
+        role: handoff-construction
+      - source: src/run-journal.ts
+        role: append-only-evidence

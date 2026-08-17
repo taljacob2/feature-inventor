@@ -99,11 +99,30 @@ Add `--json` for machine-readable output (same data, no section headers).
   "requiredChecks": ["npm test", "npm run build"],
   "protectedPaths": [".github/workflows/**"],
   "reviewPolicy": { "maxFilesChanged": 12, "humanApprovalRequired": true },
-  "schedule": { "mode": "manual" }
+  "schedule": { "mode": "manual" },
+  "indexing": {
+    "enabled": true,
+    "historyDays": 90,
+    "defaultContextPack": "change",
+    "maxEstimatedTokens": 4000,
+    "includeGovernedArtifacts": true
+  }
 }
 ```
 
-Run `feature-inventor doctor` before planning or launching a run. Unknown manifest fields are reported as warnings rather than silently ignored. Manifest creation will move to `feature-inventor init` in the next remediation batch; until then, copy the documented shape above and adapt it for the target repository.
+Run `feature-inventor doctor` before planning or launching a run. Unknown manifest fields are reported as warnings rather than silently ignored. The optional `indexing` section sets local repository-intelligence policy. Its Git-history window is maintenance evidence only; it is not a measure of runtime or user activity. Manifest creation will move to `feature-inventor init` in a later remediation batch; until then, copy the documented shape above and adapt it for the target repository.
+
+### Repository orientation and indexing
+
+`INDEX.md` is the concise committed navigation map. `docs/indexing/features.yml` is the reviewed source-linked feature and flow registry. Together they provide a fast, auditable route from a product capability to its entry point, implementation paths, tests, and risks without treating generated summaries as source of truth.
+
+```sh
+feature-inventor docs validate
+feature-inventor index status
+# Each command also supports --json.
+```
+
+`docs validate` checks the committed registry and every referenced source path or exported symbol. `index status` is read-only: it reports whether a future generated local snapshot is fresh, stale, dirty, incomplete, disabled, or not yet initialized. Snapshots remain under the Git-ignored `.feature-inventor/index/` directory and are rebuilt from an exact checkout rather than committed. See the [Repository Index](INDEX.md) and [Indexing and Context Retrieval](docs/indexing/INDEXING.md) guides for the contract and rollout.
 
 ### Portable run planning (runtime-neutral foundation)
 
@@ -361,3 +380,5 @@ half-implementing them — see `ROADMAP.md`).
 ## Developer documentation
 
 Developers adding or maintaining an execution engine should read the [Runtime Adapter Implementation Guide](docs/runtimes/IMPLEMENTING_ADAPTERS.md). It describes the adapter contract, capability model, lifecycle ownership rules, conformance requirements, and a practical workflow for future runtimes such as Codex.
+
+Developers adding a product capability, source flow, or language extractor should start with the [Repository Index](INDEX.md) and [Indexing and Context Retrieval guide](docs/indexing/INDEXING.md). The committed registry is validated with `feature-inventor docs validate`; generated local snapshots remain advisory and commit-pinned.

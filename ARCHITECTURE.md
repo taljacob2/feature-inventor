@@ -19,13 +19,21 @@ Feature Inventor itself is the reference target used to exercise and improve the
 
 ## Target operating model
 
-A target repository supplies a `feature-inventor.target.json` manifest. The manifest records its repository identity, operator-owned goals, required checks, protected paths, review policy, and scheduling preference.
+A target repository supplies a `feature-inventor.target.json` manifest. The manifest records its repository identity, operator-owned goals, required checks, protected paths, review policy, scheduling preference, and optional local indexing policy.
 
 ```text
 init -> doctor -> plan -> propose -> run -> watch -> review
 ```
 
-`init` will establish the manifest. `doctor` validates the environment and policy. `plan` remains a read-only queue preview. `propose` currently resolves the configured default branch to a commit, saves an immutable proposal, and records the first journal event. `run` will execute one governed proposal through a selected runtime adapter. `watch` will show durable run state and required human decisions. `review` will render an evidence-backed review packet.
+`init` will establish the manifest. `doctor` validates the environment and policy. `docs validate` verifies the committed repository map and source-linked feature registry. `index status` reports generated-snapshot freshness without building or modifying artifacts. `plan` remains a read-only queue preview. `propose` currently resolves the configured default branch to a commit, saves an immutable proposal, and records the first journal event. `run` will execute one governed proposal through a selected runtime adapter. `watch` will show durable run state and required human decisions. `review` will render an evidence-backed review packet.
+
+## Repository intelligence and bounded context
+
+Feature Inventor keeps a concise committed `INDEX.md`, a source-linked `docs/indexing/features.yml` registry, and a detailed `docs/indexing/INDEXING.md` contract. These curated documents provide stable orientation and product vocabulary. `docs validate` fails visibly when a declared source path, exported symbol, flow, or risk tag drifts.
+
+Generated repository intelligence is deliberately local under `.feature-inventor/index/`. A future builder will produce commit-pinned inventory, source graphs, separate structural and historical heatmaps, and bounded context packs. The system must distinguish dependency reachability, Git churn, test linkage, governed-run observations, and any opt-in runtime telemetry. None of those signals may be presented as application usage unless it is actual configured runtime telemetry.
+
+A context pack selects the smallest direct set of entry points, implementation paths, tests, and governed artifacts for an explicit feature or change scope. It records source anchors, evidence types, selection reasons, a commit, and a hard estimated-token budget. It is a retrieval aid only: agents must inspect the linked source before making implementation or verification decisions.
 
 ## Shared execution model
 
@@ -58,17 +66,18 @@ The implementation order is deliberate:
 2. **Complete:** Add a target manifest and `doctor` preflight.
 3. **Foundation complete:** Add commit-pinned proposals and an append-only run journal.
 4. **Foundation complete:** Shared proposal, journal, runtime-result, and evidence gates are enforced for Manus and local Claude Code execution.
-5. Convert any remaining runtime-specific paths, including the historical workflow script, into explicit adapters or retire them from supported execution.
-6. Add risk-aware verification policies and richer review packets from captured artifacts.
-7. **Complete boundary:** Retire the legacy daemon that invoked the archived workflow. `schedule handoff` now records an exact proposal-pinned command without scheduling or executing it.
-8. Choose and implement an explicit durable scheduler only after a deployment target, run frequency, and review cadence are selected.
-9. Support a selected external target repository only after the shared engine is proven.
+5. **Foundation complete:** Add the committed repository map, source-linked feature registry, indexing policy, validation command, and non-mutating snapshot status. Build deterministic inventory, language graphs, heatmaps, and context packs incrementally on this contract.
+6. Convert any remaining runtime-specific paths, including the historical workflow script, into explicit adapters or retire them from supported execution.
+7. Add risk-aware verification policies and richer review packets from captured artifacts.
+8. **Complete boundary:** Retire the legacy daemon that invoked the archived workflow. `schedule handoff` now records an exact proposal-pinned command without scheduling or executing it.
+9. Choose and implement an explicit durable scheduler only after a deployment target, run frequency, and review cadence are selected.
+10. Support a selected external target repository only after the shared engine is proven.
 
 Do not prioritize a dashboard, parallel feature execution, fleet management, or broader autonomy before the earlier controls are complete.
 
 ## Definition of success
 
-A maintainer can initialize Feature Inventor for one repository, understand the governing policy, produce a one-feature proposal pinned to a commit, execute it in an isolated workspace, inspect a durable review packet, recover cleanly after interruption, and observe no default-branch or remote change without an explicit human decision.
+A maintainer can initialize Feature Inventor for one repository, understand the governing policy and source-linked core flows, produce a one-feature proposal pinned to a commit, execute it in an isolated workspace, inspect a durable review packet, recover cleanly after interruption, and observe no default-branch or remote change without an explicit human decision.
 
 ## Runtime adapter registry
 

@@ -46,6 +46,23 @@ describe("target manifest", () => {
     );
   });
 
+  it("accepts an optional explicit indexing policy and rejects invalid context settings", () => {
+    const indexing = {
+      enabled: true,
+      historyDays: 90,
+      defaultContextPack: "change" as const,
+      maxEstimatedTokens: 4000,
+      includeGovernedArtifacts: true,
+    };
+    expect(parseTargetManifest(JSON.stringify({ ...MANIFEST, indexing })).manifest.indexing).toEqual(indexing);
+    expect(() => parseTargetManifest(JSON.stringify({ ...MANIFEST, indexing: { ...indexing, defaultContextPack: "all" } }))).toThrow(
+      "indexing.defaultContextPack",
+    );
+    expect(() => parseTargetManifest(JSON.stringify({ ...MANIFEST, indexing: { ...indexing, historyDays: 0 } }))).toThrow(
+      "indexing.historyDays must be a positive integer",
+    );
+  });
+
   it("serializes a manifest as reproducible formatted JSON", () => {
     expect(parseTargetManifest(serializeTargetManifest(MANIFEST))).toEqual({ manifest: MANIFEST, warnings: [] });
   });

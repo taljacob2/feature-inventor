@@ -1,3 +1,5 @@
+import { type ContextPackKind, type IndexingConfig } from "./indexing/types.js";
+
 export const TARGET_MANIFEST_FILENAME = "feature-inventor.target.json";
 
 export interface TargetManifest {
@@ -16,6 +18,8 @@ export interface TargetManifest {
   schedule: {
     mode: "manual";
   };
+  /** Optional local indexing policy. Existing manifests remain valid without it. */
+  indexing?: IndexingConfig;
 }
 
 export interface ParsedTargetManifest {
@@ -55,6 +59,35 @@ function requirePositiveInteger(value: unknown, path: string): number {
   return value;
 }
 
+function requireBoolean(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean") throw new Error(`${path} must be a boolean`);
+  return value;
+}
+
+function parseIndexingConfig(value: unknown, warnings: string[]): IndexingConfig {
+  const indexing = requireRecord(value, `${TARGET_MANIFEST_FILENAME}.indexing`);
+  warnUnknownKeys(
+    indexing,
+    ["enabled", "historyDays", "defaultContextPack", "maxEstimatedTokens", "includeGovernedArtifacts"],
+    `${TARGET_MANIFEST_FILENAME}.indexing`,
+    warnings,
+  );
+  const defaultContextPack = requireString(indexing.defaultContextPack, `${TARGET_MANIFEST_FILENAME}.indexing.defaultContextPack`);
+  if (!["orientation", "change", "verification", "deep"].includes(defaultContextPack)) {
+    throw new Error(`${TARGET_MANIFEST_FILENAME}.indexing.defaultContextPack must be orientation, change, verification, or deep`);
+  }
+  return {
+    enabled: requireBoolean(indexing.enabled, `${TARGET_MANIFEST_FILENAME}.indexing.enabled`),
+    historyDays: requirePositiveInteger(indexing.historyDays, `${TARGET_MANIFEST_FILENAME}.indexing.historyDays`),
+    defaultContextPack: defaultContextPack as ContextPackKind,
+    maxEstimatedTokens: requirePositiveInteger(indexing.maxEstimatedTokens, `${TARGET_MANIFEST_FILENAME}.indexing.maxEstimatedTokens`),
+    includeGovernedArtifacts: requireBoolean(
+      indexing.includeGovernedArtifacts,
+      `${TARGET_MANIFEST_FILENAME}.indexing.includeGovernedArtifacts`,
+    ),
+  };
+}
+
 function warnUnknownKeys(record: Record<string, unknown>, allowed: string[], path: string, warnings: string[]): void {
   for (const key of Object.keys(record)) {
     if (!allowed.includes(key)) warnings.push(`Unknown ${path}.${key} will be ignored by this version`);
@@ -79,7 +112,7 @@ export function parseTargetManifest(content: string): ParsedTargetManifest {
   const warnings: string[] = [];
   warnUnknownKeys(
     root,
-    ["schemaVersion", "repository", "goals", "requiredChecks", "protectedPaths", "reviewPolicy", "schedule"],
+    ["schemaVersion", "repository", "goals", "requiredChecks", "protectedPaths", "reviewPolicy", "schedule", "indexing"],
     TARGET_MANIFEST_FILENAME,
     warnings,
   );
@@ -103,6 +136,7 @@ export function parseTargetManifest(content: string): ParsedTargetManifest {
   const schedule = requireRecord(root.schedule, `${TARGET_MANIFEST_FILENAME}.schedule`);
   warnUnknownKeys(schedule, ["mode"], `${TARGET_MANIFEST_FILENAME}.schedule`, warnings);
   if (schedule.mode !== "manual") throw new Error(`${TARGET_MANIFEST_FILENAME}.schedule.mode must be "manual"`);
+  const indexing = root.indexing === undefined ? undefined : parseIndexingConfig(root.indexing, warnings);
 
   return {
     manifest: {
@@ -122,6 +156,7 @@ export function parseTargetManifest(content: string): ParsedTargetManifest {
         humanApprovalRequired: reviewPolicy.humanApprovalRequired,
       },
       schedule: { mode: "manual" },
+      ...(indexing ? { indexing } : {}),
     },
     warnings,
   };

@@ -14,5 +14,12 @@
     "maxFilesChanged": 12,
     "humanApprovalRequired": true
   },
-  "schedule": { "mode": "manual" }
+  "schedule": { "mode": "manual" },
+  "indexing": {
+    "enabled": true,
+    "historyDays": 90,
+    "defaultContextPack": "change",
+    "maxEstimatedTokens": 4000,
+    "includeGovernedArtifacts": true
+  }
 }
