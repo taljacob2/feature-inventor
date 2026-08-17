@@ -36,6 +36,7 @@ import { formatRegistryValidation, validateFeatureRegistryFile } from "./indexin
 import { INDEX_ARTIFACT_FILENAMES, buildIndexSnapshot, readIndexArtifact, readIndexReport } from "./indexing/index-builder.js";
 import { buildContextPack, formatContextPack, persistContextPack } from "./indexing/context-pack.js";
 import { resolveContextScope } from "./indexing/context-scope.js";
+import { createContextPackReference } from "./context-pack-provenance.js";
 import { rowsForHeatmapLens } from "./indexing/heatmaps.js";
 import { formatIndexStatus, getIndexStatus } from "./indexing/index-status.js";
 import {
@@ -569,14 +570,34 @@ export async function runIndex(repoRoot: string, args: string[]): Promise<void> 
   throw new Error("Usage: feature-inventor index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json] | index context --feature ID|--flow ID|--path PATH|--command NAME [--pack orientation|change|verification|deep] [--max-tokens COUNT] [--json]");
 }
 
+interface ProposeOptions {
+  json?: boolean;
+  contextPackPath?: string;
+}
+
 /** Saves a commit-pinned proposal and its initial journal event without launching an execution runtime. */
-export async function runPropose(repoRoot: string, options: { json?: boolean } = {}): Promise<void> {
+export async function runPropose(repoRoot: string, options: ProposeOptions = {}): Promise<void> {
   const manifestContent = readOptionalFile(repoRoot, TARGET_MANIFEST_FILENAME);
   if (manifestContent === null) throw new Error(`${TARGET_MANIFEST_FILENAME} is required before proposing a run`);
   const { manifest, warnings } = parseTargetManifest(manifestContent);
   const baseCommit = await readGitValue(repoRoot, ["rev-parse", "--verify", `${manifest.repository.defaultBranch}^{commit}`]);
   if (baseCommit === null) {
     throw new Error(`Could not resolve configured default branch ${manifest.repository.defaultBranch} to a commit`);
+  }
+  let contextPack;
+  if (options.contextPackPath) {
+    const indexContext = await loadIndexManifestContext(repoRoot);
+    const status = getIndexStatus(repoRoot, indexContext.config, indexContext.targetCommit, indexContext.workspaceClean);
+    const snapshotDirectory = requireFreshSnapshot(repoRoot, status);
+    if (baseCommit !== status.snapshot!.targetCommit) {
+      throw new Error("The fresh context pack snapshot must match the proposal base commit");
+    }
+    contextPack = createContextPackReference({
+      repoRoot,
+      contextPackPath: options.contextPackPath,
+      snapshotDirectory,
+      snapshot: status.snapshot!,
+    });
   }
 
   const createdAt = new Date().toISOString();
@@ -590,6 +611,7 @@ export async function runPropose(repoRoot: string, options: { json?: boolean } =
     baseCommit,
     manifest,
     plan: getRunPlanData(repoRoot),
+    contextPack,
   });
   const proposalPath = join(runDirectory, RUN_PROPOSAL_FILENAME);
   const journalPath = join(runDirectory, RUN_JOURNAL_FILENAME);
@@ -618,6 +640,10 @@ export async function runPropose(repoRoot: string, options: { json?: boolean } =
   console.log(`Base commit: ${baseCommit}`);
   console.log(`Proposal: ${proposalPath}`);
   console.log(`Journal: ${journalPath}`);
+  if (proposal.contextPack) {
+    console.log(`Context pack provenance: ${proposal.contextPack.id} (${proposal.contextPack.jsonPath})`);
+    console.log("Context-pack provenance is informational design context, not verification evidence or execution authorization.");
+  }
   if (warnings.length > 0) console.log(`Manifest warnings: ${warnings.join("; ")}`);
   console.log("No agent was started and no repository change was made.");
 }
@@ -1677,7 +1703,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | docs validate [--json] | index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json] | index context --feature ID|--flow ID|--path PATH|--command NAME [--pack orientation|change|verification|deep] [--max-tokens COUNT] [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | docs validate [--json] | index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json] | index context --feature ID|--flow ID|--path PATH|--command NAME [--pack orientation|change|verification|deep] [--max-tokens COUNT] [--json] | plan [--json] | propose [--context-pack PATH] [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once | --every DURATION ...] | --help | --version]\n" +
   "  daemon execution is retired and fails closed because it used the archived nightly workflow. " +
   "Use `schedule handoff RUN_ID --runtime claude|manus` to write an exact proposal-pinned handoff instead.\n" +
@@ -1748,6 +1774,29 @@ export function parseDaemonOptions(args: string[]): DaemonOptions {
   };
 }
 
+function parseProposeOptions(args: string[]): ProposeOptions {
+  let contextPackPath: string | undefined;
+  let json = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--json") {
+      if (json) throw new Error("propose accepts --json at most once");
+      json = true;
+      continue;
+    }
+    if (arg === "--context-pack") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) throw new Error("propose --context-pack requires a repository-relative JSON artifact path");
+      if (contextPackPath !== undefined) throw new Error("propose accepts --context-pack at most once");
+      contextPackPath = value;
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown propose option: ${arg}`);
+  }
+  return { json, contextPackPath };
+}
+
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
 
@@ -1771,7 +1820,7 @@ async function main(): Promise<void> {
       printRunPlan(process.cwd(), { json: rest.includes("--json") });
       break;
     case "propose":
-      await runPropose(process.cwd(), { json: rest.includes("--json") });
+      await runPropose(process.cwd(), parseProposeOptions(rest));
       break;
     case "journal":
       runJournal(process.cwd(), rest);

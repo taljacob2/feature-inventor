@@ -109,6 +109,12 @@ Every selected item includes its path, optional symbol, line span, selection rea
 
 The execution runtime must open and verify the linked source files before it makes an implementation, verification, or governance decision. A context pack is a scope reducer, not a replacement for code reading, a basis for unverified claims, or an authorization to change the repository.
 
+### Optional proposal provenance
+
+`feature-inventor propose --context-pack RELATIVE_JSON_PATH` can record one already-persisted context pack on a new immutable proposal. It requires a fresh snapshot whose target commit equals the proposal's resolved default-branch commit. The stored proposal reference contains only reproducibility metadata: the pack ID, relative JSON and Markdown paths, SHA-256 digest of the JSON artifact, snapshot policy digest, selector, pack kind, and token accounting. It does not copy source excerpts into the proposal.
+
+> **Trust boundary:** Context-pack provenance is informational design history. It does not satisfy required checks, affect review readiness, authorize a runtime, establish code behavior, or replace the source and artifact evidence gates.
+
 ## Target Manifest Policy
 
 The optional `indexing` section in `feature-inventor.target.json` governs this capability. If omitted, Feature Inventor uses conservative defaults and retains backward compatibility with existing target manifests.

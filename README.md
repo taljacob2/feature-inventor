@@ -171,7 +171,15 @@ feature-inventor propose
 # or: feature-inventor propose --json
 ```
 
-`propose` does **not** start an agent. It resolves the configured default branch to a concrete Git commit, stores the full queue and policy with stable hashes, and initializes an append-only journal with a `planned` event. Local artifacts are placed under `.feature-inventor/runs/<run-id>/` and are intentionally ignored by Git.
+When a design briefing has already been generated from a fresh snapshot, it may be recorded as optional provenance:
+
+```sh
+feature-inventor index build
+feature-inventor index context --feature governed-run --pack change --json
+feature-inventor propose --context-pack .feature-inventor/index/v1/COMMIT/context/context-ID.json
+```
+
+`propose` does **not** start an agent. It resolves the configured default branch to a concrete Git commit, stores the full queue and policy with stable hashes, and initializes an append-only journal with a `planned` event. With `--context-pack`, it accepts only a repository-relative persisted JSON artifact from a **fresh** snapshot whose target commit matches the proposal base commit. The proposal records the pack ID, selector, budget, repository-relative artifact paths, policy digest, and SHA-256 content hash. This is **informational design provenance only**: it is not source evidence, verification evidence, execution authorization, or an input to review readiness. Local artifacts are placed under `.feature-inventor/runs/<run-id>/` and are intentionally ignored by Git.
 
 ```sh
 feature-inventor status

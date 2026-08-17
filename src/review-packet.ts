@@ -1,4 +1,4 @@
-import type { RunProposal } from "./run-proposal.js";
+import { assertContextPackReference, type ContextPackReference, type RunProposal } from "./run-proposal.js";
 
 export const TASK_OUTCOME_FILENAME = "task-outcome.json";
 export const REVIEW_PACKET_FILENAME = "review.json";
@@ -34,6 +34,8 @@ export interface ReviewPacket {
     manifestHash: string;
     policyHash: string;
     requiredChecks: string[];
+    /** Informational design-context provenance; never a readiness-gate input. */
+    contextPack?: ContextPackReference;
   };
   taskOutcome: TaskOutcome | null;
   runtimeResultCaptured: boolean;
@@ -102,6 +104,7 @@ export function createReviewPacket(
       manifestHash: proposal.manifestHash,
       policyHash: proposal.policyHash,
       requiredChecks,
+      ...(proposal.contextPack ? { contextPack: structuredClone(proposal.contextPack) } : {}),
     },
     taskOutcome,
     runtimeResultCaptured,
@@ -205,5 +208,14 @@ export function parseReviewPacket(content: string): ReviewPacket {
     throw new Error("Invalid review packet: incomplete evidence-backed packet");
   }
   assertDate(parsed.createdAt, "createdAt");
+  if (parsed.proposal.contextPack !== undefined) {
+    if (!isRecord(parsed.proposal.contextPack)) throw new Error("Invalid review packet: proposal.contextPack must be an object when present");
+    try {
+      assertContextPackReference(parsed.proposal.contextPack as unknown as ContextPackReference);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Invalid review packet: proposal.contextPack ${reason}`);
+    }
+  }
   return parsed as unknown as ReviewPacket;
 }
