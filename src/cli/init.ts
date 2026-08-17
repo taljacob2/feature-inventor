@@ -111,10 +111,10 @@ function createReadlinePrompt(): InitPrompt {
 async function guidedInput(repoRoot: string, options: InitCommandOptions, prompt: InitPrompt): Promise<Omit<InitializeTargetInput, "repoRoot" | "force">> {
   const defaults = await detectRepositoryDefaults(repoRoot);
   return {
-    repositoryUrl: options.repositoryUrl ?? await prompt.ask("Repository URL", defaults.repositoryUrl ?? undefined),
-    defaultBranch: options.defaultBranch ?? await prompt.ask("Default branch", defaults.defaultBranch ?? undefined),
-    goal: options.goal ?? await prompt.ask("First improvement goal"),
-    requiredCheck: options.requiredCheck ?? await prompt.ask("Required validation command"),
+    repositoryUrl: options.repositoryUrl ?? await prompt.ask("Repository URL (used to validate Git origin)", defaults.repositoryUrl ?? undefined),
+    defaultBranch: options.defaultBranch ?? await prompt.ask("Default branch (proposals pin this branch to a commit)", defaults.defaultBranch ?? undefined),
+    goal: options.goal ?? await prompt.ask("First improvement goal (operator-owned)"),
+    requiredCheck: options.requiredCheck ?? await prompt.ask("Required validation command (run after a change)"),
     ...(options.maxFilesChanged === undefined ? {} : { maxFilesChanged: options.maxFilesChanged }),
     ...(options.indexingEnabled === undefined ? {} : { indexingEnabled: options.indexingEnabled }),
   };
@@ -154,12 +154,13 @@ export async function runInitCommand(
 export function formatInitResult(result: InitCommandResult): string {
   const action = result.overwritten ? "Updated" : "Created";
   return [
-    `${action} ${result.manifestPath}`,
+    `${action} local target contract: ${result.manifestPath}`,
     `Setup mode: ${result.mode}`,
+    "Configuration is saved. No runtime, proposal, source change, or schedule has been created.",
     "Next safe steps:",
     "  feature-inventor doctor",
     "  feature-inventor overview",
     "  feature-inventor plan",
-    "No runtime has been started.",
+    "Operator review remains required before any governed execution.",
   ].join("\n");
 }

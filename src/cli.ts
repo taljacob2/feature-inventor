@@ -124,6 +124,7 @@ import {
 } from "./cli/terminal.js";
 import { formatCommandHelp, formatTopLevelHelp, formatUnknownHelpTopic } from "./cli/help.js";
 import { formatInitResult, parseInitCommandOptions, runInitCommand } from "./cli/init.js";
+import { generateCompletion, isCompletionShell, SUPPORTED_SHELLS } from "./cli/completion.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -1853,6 +1854,13 @@ export function parseDaemonOptions(args: string[]): DaemonOptions {
   };
 }
 
+function runCompletion(args: string[]): void {
+  if (args.length !== 1 || !isCompletionShell(args[0]!)) {
+    throw new Error(`Usage: feature-inventor completion <${SUPPORTED_SHELLS.join("|")}>`);
+  }
+  process.stdout.write(generateCompletion(args[0]!));
+}
+
 function parseProposeOptions(args: string[]): ProposeOptions {
   let contextPackPath: string | undefined;
   let skipAutomaticPreparation = false;
@@ -1921,6 +1929,9 @@ export async function runCli(args: string[] = process.argv.slice(2), defaultCwd:
       console.log(options.json ? JSON.stringify(result, null, 2) : formatInitResult(result));
       break;
     }
+    case "completion":
+      runCompletion(rest);
+      break;
     case "status":
       printStatus(repoRoot, { json });
       break;

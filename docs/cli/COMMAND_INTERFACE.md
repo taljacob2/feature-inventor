@@ -6,11 +6,12 @@ Feature Inventor exposes a governed command-line interface for one target reposi
 
 New users should begin with `feature-inventor init`, `feature-inventor overview`, and `feature-inventor doctor`. `init` creates an explicit local target manifest through a guided interactive flow or a fully explicit non-interactive command; it never starts a runtime or creates a proposal. `overview` is the official orientation command. It summarizes the local queue, recent governed runs, and one next safe action. It neither starts a runtime nor creates a proposal. See [INSTALLATION_AND_ONBOARDING.md](INSTALLATION_AND_ONBOARDING.md) for installation, first-run, and automation details.
 
-The existing `status` command remains a compatibility alias. It preserves the older detailed status renderer and its existing JSON contract. Runtime-specific aliases, including `manus run` and `claude run`, remain available; the runtime-neutral `run --runtime ID --run RUN_ID` command is the primary execution path.
+The existing `status` command remains a compatibility alias. It preserves the older detailed status renderer and its existing JSON contract. Runtime-specific aliases, including `manus run` and `claude run`, remain available; the runtime-neutral `run --runtime ID --run RUN_ID` command is the primary execution path. `completion` prints a generated script only; installation, sourcing, and profile modification remain explicit operator actions documented in [INSTALLATION_AND_ONBOARDING.md](INSTALLATION_AND_ONBOARDING.md).
 
 | Need | Recommended command |
 |---|---|
 | Create the local target contract | `feature-inventor init` |
+| Print a reviewed shell completion script | `feature-inventor completion bash|zsh|fish|powershell` |
 | Understand the repository state | `feature-inventor overview` |
 | Validate prerequisites without changes | `feature-inventor doctor` |
 | Inspect candidate work | `feature-inventor plan` |
