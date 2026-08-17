@@ -50,9 +50,12 @@ Generated snapshots are local because they are derived artifacts. `feature-inven
       history.json
       heatmaps.json
       report.md
+      context/
+        <context-pack-id>.json
+        <context-pack-id>.md
 ```
 
-`inventory.json` classifies repository files while excluding generated, dependency, build, and Git directories. `graph.json` contains source-derived TypeScript exports and import, re-export, and dynamic-import relationships. Relative NodeNext `.js` specifiers resolve back to indexed TypeScript source files when that file exists. Package imports and unresolved relative modules remain visible as external edges rather than fabricated internal relationships. `history.json` aggregates Git activity in the configured window, anchored to the indexed commit timestamp. `heatmaps.json` preserves raw structural, historical, and test-linkage values. `report.md` is a human-readable summary of the same local data.
+`inventory.json` classifies repository files while excluding generated, dependency, build, and Git directories. `graph.json` contains source-derived TypeScript exports and import, re-export, and dynamic-import relationships. Relative NodeNext `.js` specifiers resolve back to indexed TypeScript source files when that file exists. Package imports and unresolved relative modules remain visible as external edges rather than fabricated internal relationships. `history.json` aggregates Git activity in the configured window, anchored to the indexed commit timestamp. `heatmaps.json` preserves raw structural, historical, and test-linkage values. `report.md` is a human-readable summary of the same local data. The optional `context/` subdirectory is created by `index context`, not by `index build`.
 
 Every `metadata.json` file must record the index schema version, generator version, target commit, generation time, configuration digest, and source-collection coverage. A snapshot is valid only for the commit and configuration it records.
 
@@ -84,9 +87,18 @@ Heatmap queries require an explicit lens and expose raw values. Use `feature-inv
 
 ## Context Packs
 
-A later `feature-inventor index context` command will construct a bounded briefing for a feature, flow, path, command, or explicit query. It will begin with references supplied by the user or proposal, resolve them through the curated registry and static graph, and select only direct entry points, primary implementations, direct dependencies, tests, and relevant governed artifacts.
+`feature-inventor index context` constructs a bounded, source-linked briefing from exactly one explicit selector. It requires a **fresh** snapshot. This prevents a pack from claiming that its excerpts represent an edited, stale, or incomplete checkout. The selector resolves through the curated registry first and then adds only direct source-graph dependencies and dependents. It never expands transitively.
 
-Every selected item must include its path, symbol or line span, selection reason, evidence type, and estimated token cost. A pack must record its target commit and index metadata. It must not silently truncate source anchors when the requested budget is exceeded.
+```sh
+feature-inventor index context --feature governed-run --pack change
+feature-inventor index context --flow runtime-observation-recovery --pack verification
+feature-inventor index context --path src/core/governed-run-service.ts#launchGovernedRun
+feature-inventor index context --command watch --max-tokens 2500
+```
+
+A request must specify exactly one of `--feature`, `--flow`, `--path`, or `--command`. Pack kinds are `orientation`, `change`, `verification`, and `deep`. `--max-tokens` can reduce the pack size, but the target-manifest `maxEstimatedTokens` policy remains an upper bound. The pack persists as both JSON and Markdown under the selected commit snapshot's `context/` directory.
+
+Every selected item includes its path, optional symbol, line span, selection reason, evidence type, and estimated token cost. Each pack records its target commit, snapshot directory, indexing policy digest, selector, pack kind, requested budget, effective budget, and fixed rendering overhead. If an item does not fit, it appears in the explicit overflow table. The system does not silently truncate or substitute a vague summary.
 
 | Pack | Default estimated-token ceiling | Intended use |
 |---|---:|---|
@@ -95,7 +107,7 @@ Every selected item must include its path, symbol or line span, selection reason
 | `verification` | 3,000 | Review and validation preparation. |
 | `deep` | 8,000 | Explicitly justified cross-cutting investigation. |
 
-The execution runtime must open the linked source files before it makes an implementation, verification, or governance decision. The pack is a scope reducer, not a replacement for code reading.
+The execution runtime must open and verify the linked source files before it makes an implementation, verification, or governance decision. A context pack is a scope reducer, not a replacement for code reading, a basis for unverified claims, or an authorization to change the repository.
 
 ## Target Manifest Policy
 

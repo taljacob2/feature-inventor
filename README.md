@@ -122,10 +122,11 @@ feature-inventor index build       # requires a clean checkout
 feature-inventor index status
 feature-inventor index report
 feature-inventor index heatmap --by centrality --limit 20
+feature-inventor index context --feature governed-run --pack change
 # Each command also supports --json.
 ```
 
-`docs validate` checks the committed registry and every referenced source path or exported symbol. `index build` writes a Git-ignored, commit-pinned local snapshot containing file inventory, TypeScript import/export relationships, commit-anchored Git activity, separate heatmap values, and a readable report. `index status` is read-only and reports freshness. `index report` reads the generated summary. `index heatmap` requires one explicit lens: `reachability`, `centrality`, `churn`, or `test-linkage`. Those lenses do not form a composite score and do not claim target application usage. See the [Repository Index](INDEX.md) and [Indexing and Context Retrieval](docs/indexing/INDEXING.md) guides for the contract and limitations.
+`docs validate` checks the committed registry and every referenced source path or exported symbol. `index build` writes a Git-ignored, commit-pinned local snapshot containing file inventory, TypeScript import/export relationships, commit-anchored Git activity, separate heatmap values, and a readable report. `index status` is read-only and reports freshness. `index report` reads the generated summary. `index heatmap` requires one explicit lens: `reachability`, `centrality`, `churn`, or `test-linkage`. Those lenses do not form a composite score and do not claim target application usage. `index context` requires a fresh snapshot and exactly one `--feature`, `--flow`, `--path`, or `--command` selector; it persists a token-budgeted JSON and Markdown briefing with source anchors, selection reasons, overflow, and reading rules. Open and verify the cited files before using a pack for implementation or review. See the [Repository Index](INDEX.md) and [Indexing and Context Retrieval](docs/indexing/INDEXING.md) guides for the contract and limitations.
 
 ### Portable run planning (runtime-neutral foundation)
 

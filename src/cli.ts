@@ -34,9 +34,19 @@ import { buildDoctorData, formatDoctor } from "./doctor.js";
 import { TARGET_MANIFEST_FILENAME, parseTargetManifest } from "./target-manifest.js";
 import { formatRegistryValidation, validateFeatureRegistryFile } from "./indexing/feature-registry.js";
 import { INDEX_ARTIFACT_FILENAMES, buildIndexSnapshot, readIndexArtifact, readIndexReport } from "./indexing/index-builder.js";
+import { buildContextPack, formatContextPack, persistContextPack } from "./indexing/context-pack.js";
+import { resolveContextScope } from "./indexing/context-scope.js";
 import { rowsForHeatmapLens } from "./indexing/heatmaps.js";
 import { formatIndexStatus, getIndexStatus } from "./indexing/index-status.js";
-import { DEFAULT_INDEXING_CONFIG, INDEX_ROOT_DOCUMENT_PATH, type HeatmapLens, type HeatmapsArtifact } from "./indexing/types.js";
+import {
+  DEFAULT_INDEXING_CONFIG,
+  INDEX_ROOT_DOCUMENT_PATH,
+  type ContextPackKind,
+  type ContextSelector,
+  type HeatmapLens,
+  type HeatmapsArtifact,
+  type ModuleGraph,
+} from "./indexing/types.js";
 import {
   RUN_PROPOSAL_FILENAME,
   RUNS_DIRECTORY,
@@ -390,10 +400,19 @@ export async function runIndexBuild(repoRoot: string, options: { json?: boolean 
 }
 
 function requireReadableSnapshot(repoRoot: string, status: ReturnType<typeof getIndexStatus>) {
+  void repoRoot;
   if (status.snapshotPath === null || status.snapshot === null) {
     throw new Error("No readable index snapshot is available; run `feature-inventor index build` from a clean checkout first");
   }
   return status.snapshotPath.slice(0, -"/metadata.json".length);
+}
+
+function requireFreshSnapshot(repoRoot: string, status: ReturnType<typeof getIndexStatus>): string {
+  const snapshotDirectory = requireReadableSnapshot(repoRoot, status);
+  if (status.state !== "fresh") {
+    throw new Error(`index context requires a fresh snapshot; current state is ${status.state}. Rebuild from a clean checkout first.`);
+  }
+  return snapshotDirectory;
 }
 
 /** Prints the stored Markdown report for the newest matching or prior-commit local snapshot. */
@@ -438,7 +457,93 @@ export async function runIndexHeatmap(repoRoot: string, args: string[]): Promise
   console.log(`Limitation: ${heatmaps.limitations.find((item) => item.toLowerCase().startsWith(lens === "churn" ? "churn" : lens === "centrality" ? "centrality" : lens === "reachability" ? "reachability" : "test linkage")) ?? "See generated report."}`);
 }
 
-/** Dispatches snapshot construction, inspection, and explicit heatmap-lens queries. */
+interface ContextCommandOptions {
+  selector: ContextSelector;
+  packKind: ContextPackKind;
+  maxEstimatedTokens?: number;
+  json: boolean;
+}
+
+function parseContextCommandOptions(args: string[]): ContextCommandOptions {
+  let selector: ContextSelector | null = null;
+  let packKind: ContextPackKind = "change";
+  let maxEstimatedTokens: number | undefined;
+  let json = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--json") {
+      if (json) throw new Error("index context accepts --json at most once");
+      json = true;
+      continue;
+    }
+    if (arg === "--feature" || arg === "--flow" || arg === "--path" || arg === "--command") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) throw new Error(`${arg} requires a value`);
+      if (selector !== null) throw new Error("index context requires exactly one selector: --feature, --flow, --path, or --command");
+      selector = { kind: arg.slice(2) as ContextSelector["kind"], value };
+      index += 1;
+      continue;
+    }
+    if (arg === "--pack") {
+      const value = args[index + 1];
+      if (value !== "orientation" && value !== "change" && value !== "verification" && value !== "deep") {
+        throw new Error("--pack must be orientation, change, verification, or deep");
+      }
+      packKind = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--max-tokens") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) throw new Error("--max-tokens requires a value");
+      if (maxEstimatedTokens !== undefined) throw new Error("index context accepts --max-tokens at most once");
+      maxEstimatedTokens = parsePositiveInteger(value, "--max-tokens");
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown index context option: ${arg}`);
+  }
+  if (selector === null) throw new Error("index context requires exactly one selector: --feature, --flow, --path, or --command");
+  return { selector, packKind, maxEstimatedTokens, json };
+}
+
+/** Builds a bounded, source-linked briefing from one explicit selector and one fresh local snapshot. */
+export async function runIndexContext(repoRoot: string, args: string[]): Promise<void> {
+  const options = parseContextCommandOptions(args);
+  const context = await loadIndexManifestContext(repoRoot);
+  const status = getIndexStatus(repoRoot, context.config, context.targetCommit, context.workspaceClean);
+  const snapshotDirectory = requireFreshSnapshot(repoRoot, status);
+  const registryValidation = validateFeatureRegistryFile(repoRoot);
+  if (!registryValidation.valid || registryValidation.registry === null) throw new Error(formatRegistryValidation(registryValidation));
+  const graph = readIndexArtifact<ModuleGraph>(snapshotDirectory, INDEX_ARTIFACT_FILENAMES.graph);
+  const scopeItems = resolveContextScope(registryValidation.registry, options.selector);
+  const pack = buildContextPack({
+    repoRoot,
+    graph,
+    scopeItems,
+    maxEstimatedTokens: options.maxEstimatedTokens,
+    provenance: {
+      targetCommit: status.snapshot!.targetCommit,
+      snapshotPath: snapshotDirectory,
+      indexSchemaVersion: status.snapshot!.schemaVersion,
+      snapshotConfigDigest: status.snapshot!.configDigest,
+      selector: options.selector,
+      packKind: options.packKind,
+      requestedMaxEstimatedTokens: context.config.maxEstimatedTokens,
+    },
+  });
+  const artifactPaths = persistContextPack(snapshotDirectory, pack);
+  const data = { pack, artifactPaths, status, manifestWarnings: context.manifestWarnings };
+  if (options.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  console.log(formatContextPack(pack));
+  console.log(`Persisted context pack JSON: ${artifactPaths.jsonPath}`);
+  console.log(`Persisted context pack Markdown: ${artifactPaths.markdownPath}`);
+}
+
+/** Dispatches snapshot construction, inspection, explicit heatmap lenses, and bounded context packs. */
 export async function runIndex(repoRoot: string, args: string[]): Promise<void> {
   const command = args[0];
   if (command === "status" && args.slice(1).every((arg) => arg === "--json")) {
@@ -457,7 +562,11 @@ export async function runIndex(repoRoot: string, args: string[]): Promise<void> 
     await runIndexHeatmap(repoRoot, args.slice(1));
     return;
   }
-  throw new Error("Usage: feature-inventor index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json]");
+  if (command === "context") {
+    await runIndexContext(repoRoot, args.slice(1));
+    return;
+  }
+  throw new Error("Usage: feature-inventor index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json] | index context --feature ID|--flow ID|--path PATH|--command NAME [--pack orientation|change|verification|deep] [--max-tokens COUNT] [--json]");
 }
 
 /** Saves a commit-pinned proposal and its initial journal event without launching an execution runtime. */
@@ -1568,7 +1677,7 @@ export async function runDaemon(repoRoot: string, options: DaemonOptions): Promi
 }
 
 const USAGE =
-  "Usage: feature-inventor [status [--json] | doctor [--json] | docs validate [--json] | index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
+  "Usage: feature-inventor [status [--json] | doctor [--json] | docs validate [--json] | index status|build|report [--json] | index heatmap --by reachability|centrality|churn|test-linkage [--limit COUNT] [--json] | index context --feature ID|--flow ID|--path PATH|--command NAME [--pack orientation|change|verification|deep] [--max-tokens COUNT] [--json] | plan [--json] | propose [--json] | journal RUN_ID [--json] | watch RUN_ID [--json] | recover RUN_ID [--json] | capture RUN_ID [--json] | verify RUN_ID --check COMMAND --passed|--failed --evidence TEXT [--json] | review RUN_ID [--json] | finalize RUN_ID --confirm [--json] | manus run --run RUN_ID [--project ID] [--github-connector ID] [--profile PROFILE] [--allow-remote-push] | claude run --run RUN_ID [--json] | run --runtime ADAPTER_ID --run RUN_ID [options] | schedule handoff RUN_ID --runtime claude|manus [--json] | recap [--since DATE|--all] [--peek] [--json] | stop [--cancel] | " +
   "daemon [clean | --once | --every DURATION ...] | --help | --version]\n" +
   "  daemon execution is retired and fails closed because it used the archived nightly workflow. " +
   "Use `schedule handoff RUN_ID --runtime claude|manus` to write an exact proposal-pinned handoff instead.\n" +

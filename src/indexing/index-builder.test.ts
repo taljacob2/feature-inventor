@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runIndexBuild, runIndexHeatmap, runIndexReport } from "../cli.js";
+import { runIndexBuild, runIndexContext, runIndexHeatmap, runIndexReport } from "../cli.js";
 import { INDEX_ARTIFACT_FILENAMES, buildIndexSnapshot } from "./index-builder.js";
 import { getIndexStatus } from "./index-status.js";
 import { DEFAULT_INDEXING_CONFIG } from "./types.js";
@@ -113,6 +113,21 @@ describe("index snapshot builder and commands", () => {
     const reportData = JSON.parse(String(logSpy.mock.calls[2]?.[0]));
     expect(reportData.status.state).toBe("fresh");
     expect(reportData.report).toContain("Generated Repository Index Report");
+
+    await runIndexContext(directory, ["--feature", "sample", "--max-tokens", "500", "--json"]);
+    const contextData = JSON.parse(String(logSpy.mock.calls[3]?.[0]));
+    expect(contextData.pack.provenance).toMatchObject({ selector: { kind: "feature", value: "sample" }, effectiveMaxEstimatedTokens: 500 });
+    expect(existsSync(contextData.artifactPaths.jsonPath)).toBe(true);
+  });
+
+  it("refuses context generation when the indexed snapshot is no longer fresh", async () => {
+    const { directory } = createGitFixture();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await runIndexBuild(directory);
+    writeFileSync(join(directory, "src", "service.ts"), "export function service(): string { return \"changed\"; }\n", "utf8");
+
+    await expect(runIndexContext(directory, ["--feature", "sample"])).rejects.toThrow("requires a fresh snapshot; current state is dirty");
+    expect(logSpy).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a build from a dirty checkout rather than claiming artifacts match a commit", async () => {

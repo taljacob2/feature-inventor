@@ -211,3 +211,71 @@ export interface IndexBuildResult {
   report: IndexReport;
   snapshotDirectory: string;
 }
+
+export const CONTEXT_PACK_DEFAULT_TOKEN_BUDGETS: Record<ContextPackKind, number> = {
+  orientation: 1_500,
+  change: 4_000,
+  verification: 3_000,
+  deep: 8_000,
+};
+
+export type ContextSelectorKind = "feature" | "flow" | "path" | "command";
+
+export interface ContextSelector {
+  kind: ContextSelectorKind;
+  value: string;
+}
+
+export type ContextEvidenceType =
+  | "explicit-scope"
+  | "curated-feature-map"
+  | "declared-flow"
+  | "direct-test"
+  | "source-graph-dependency"
+  | "source-graph-dependent";
+
+export interface ContextSourceAnchor {
+  path: string;
+  symbol: string | null;
+}
+
+export interface ContextSelection {
+  anchor: ContextSourceAnchor;
+  priority: number;
+  selectionReasons: string[];
+  evidenceTypes: ContextEvidenceType[];
+  lineStart: number;
+  lineEnd: number;
+  estimatedTokens: number;
+  content: string;
+}
+
+export interface ContextOverflowItem {
+  anchor: ContextSourceAnchor;
+  priority: number;
+  selectionReasons: string[];
+  evidenceTypes: ContextEvidenceType[];
+  estimatedTokens: number;
+  reason: "budget-exceeded";
+}
+
+export interface ContextPackProvenance {
+  targetCommit: string;
+  snapshotPath: string;
+  indexSchemaVersion: typeof INDEX_SCHEMA_VERSION;
+  snapshotConfigDigest: string;
+  selector: ContextSelector;
+  packKind: ContextPackKind;
+  requestedMaxEstimatedTokens: number;
+  effectiveMaxEstimatedTokens: number;
+}
+
+export interface ContextPack {
+  id: string;
+  provenance: ContextPackProvenance;
+  fixedOverheadEstimatedTokens: number;
+  estimatedTokens: number;
+  selected: ContextSelection[];
+  overflow: ContextOverflowItem[];
+  readingRules: string[];
+}

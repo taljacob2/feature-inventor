@@ -15,6 +15,7 @@ This file is the short entry point for developers and execution runtimes. It doe
 | Validate the curated index | `feature-inventor docs validate` |
 | Build or check a generated local snapshot | `feature-inventor index build`, then `feature-inventor index status` |
 | Read generated structural or historical evidence | `feature-inventor index report` or `feature-inventor index heatmap --by LENS` |
+| Produce a bounded implementation briefing | `feature-inventor index context --feature ID|--flow ID|--path PATH|--command NAME` |
 | Implement a runtime adapter | [docs/runtimes/IMPLEMENTING_ADAPTERS.md](docs/runtimes/IMPLEMENTING_ADAPTERS.md) |
 | Understand index design, freshness, and trust boundaries | [docs/indexing/INDEXING.md](docs/indexing/INDEXING.md) |
 
@@ -58,7 +59,7 @@ The curated registry contains the machine-validated version of these flow defini
 
 Generated index artifacts belong under `.feature-inventor/index/` and are intentionally local. The directory is ignored by Git because snapshots are derived from an exact checkout and should be rebuilt rather than committed.
 
-The index builder now produces a deterministic file inventory, TypeScript import/export graph, commit-anchored Git history, separate heatmap lenses, and a Markdown report. Run `feature-inventor index build` only from a clean checkout. Query a single lens with `feature-inventor index heatmap --by reachability|centrality|churn|test-linkage`; these values are evidence categories, not a blended usage score. Token-budgeted context packs remain the next increment. See [docs/indexing/INDEXING.md](docs/indexing/INDEXING.md) for the contract and limitations.
+The index builder now produces a deterministic file inventory, TypeScript import/export graph, commit-anchored Git history, separate heatmap lenses, a Markdown report, and persisted token-budgeted context packs. Run `feature-inventor index build` only from a clean checkout. Query a single lens with `feature-inventor index heatmap --by reachability|centrality|churn|test-linkage`; these values are evidence categories, not a blended usage score. Build a briefing only from a fresh snapshot with `feature-inventor index context` and exactly one explicit selector. See [docs/indexing/INDEXING.md](docs/indexing/INDEXING.md) for the contract and limitations.
 
 ## Reading Order for Feature Work
 
