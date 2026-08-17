@@ -53,13 +53,20 @@ describe("target manifest", () => {
       defaultContextPack: "change" as const,
       maxEstimatedTokens: 4000,
       includeGovernedArtifacts: true,
+      autoPrepareOnPropose: true,
     };
     expect(parseTargetManifest(JSON.stringify({ ...MANIFEST, indexing })).manifest.indexing).toEqual(indexing);
+    const legacyIndexing = { ...indexing };
+    delete (legacyIndexing as Partial<typeof indexing>).autoPrepareOnPropose;
+    expect(parseTargetManifest(JSON.stringify({ ...MANIFEST, indexing: legacyIndexing })).manifest.indexing?.autoPrepareOnPropose).toBe(false);
     expect(() => parseTargetManifest(JSON.stringify({ ...MANIFEST, indexing: { ...indexing, defaultContextPack: "all" } }))).toThrow(
       "indexing.defaultContextPack",
     );
     expect(() => parseTargetManifest(JSON.stringify({ ...MANIFEST, indexing: { ...indexing, historyDays: 0 } }))).toThrow(
       "indexing.historyDays must be a positive integer",
+    );
+    expect(() => parseTargetManifest(JSON.stringify({ ...MANIFEST, indexing: { ...indexing, autoPrepareOnPropose: "yes" } }))).toThrow(
+      "indexing.autoPrepareOnPropose must be a boolean",
     );
   });
 

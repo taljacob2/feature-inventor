@@ -26,14 +26,14 @@ This file is the short entry point for developers and execution runtimes. It doe
 | Flow | Entry point | Primary implementation | Tests and detailed reference |
 |---|---|---|---|
 | Target contract and preflight | `src/cli.ts#runDoctor` | `src/target-manifest.ts`, `src/doctor.ts` | `src/target-manifest.test.ts`, `src/doctor.test.ts` |
-| Proposal creation | `src/cli.ts#runPropose` | `src/run-proposal.ts`, `src/context-pack-provenance.ts`, `src/risk-verification-policy.ts`, `src/run-journal.ts`, `src/run-plan.ts` | `src/run-proposal.test.ts`, `src/risk-verification-policy.test.ts`, `src/proposal-context-provenance.test.ts`, `src/governed-runs.test.ts` |
+| Proposal creation | `src/cli.ts#runPropose` | `src/automatic-proposal-preparation.ts`, `src/run-proposal.ts`, `src/context-pack-provenance.ts`, `src/risk-verification-policy.ts`, `src/run-journal.ts`, `src/run-plan.ts` | `src/automatic-proposal-preparation.test.ts`, `src/run-proposal.test.ts`, `src/risk-verification-policy.test.ts`, `src/proposal-context-provenance.test.ts`, `src/governed-runs.test.ts` |
 | Governed runtime launch | `src/cli.ts#runRuntime` | `src/core/governed-run-service.ts`, `src/runtimes/registry.ts`, `src/runtimes/types.ts` | `src/runtimes/registry.test.ts`, [adapter guide](docs/runtimes/IMPLEMENTING_ADAPTERS.md) |
 | Passive observation and recovery | `src/cli.ts#runWatch` | `src/core/governed-run-service.ts`, `src/runtimes/manus.ts`, `src/run-journal.ts` | `src/runtimes/manus.test.ts`, `src/runtimes/registry.test.ts` |
 | Runtime result, verification, and review | `src/cli.ts#runCapture`, `src/cli.ts#runReview` | `src/runtime-result.ts`, `src/risk-verification-policy.ts`, `src/review-packet.ts` | `src/runtime-result.test.ts`, `src/risk-verification-policy.test.ts`, `src/review-packet.test.ts` |
 | Runtime adapter extension | `src/runtimes/types.ts#RuntimeAdapter` | `src/runtimes/registry.ts`, `src/runtimes/builtins.ts` | `src/runtimes/registry.test.ts`, [adapter guide](docs/runtimes/IMPLEMENTING_ADAPTERS.md) |
 | Proposal-pinned scheduler handoff | `src/cli.ts#runSchedule` | `src/schedule-handoff.ts` | `src/schedule-handoff.test.ts` |
 
-The curated registry contains the machine-validated version of these flow definitions, including risk tags and source references. Keep it aligned whenever a product capability or implementation boundary changes.
+The curated registry contains the machine-validated version of these flow definitions, including risk tags and source references. With `indexing.autoPrepareOnPropose` enabled, explicit proposal creation refreshes a clean local snapshot and attaches a context pack only for one exact curated feature match; it never guesses scope or starts a runtime. Keep the registry aligned whenever a product capability or implementation boundary changes.
 
 ## System Areas
 

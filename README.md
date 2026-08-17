@@ -123,6 +123,8 @@ Add `--json` for machine-readable output (same data, no section headers).
 
 Run `feature-inventor doctor` before planning or launching a run. Unknown manifest fields are reported as warnings rather than silently ignored. The optional `indexing` section sets local repository-intelligence policy. Its Git-history window is maintenance evidence only; it is not a measure of runtime or user activity. Manifest creation will move to `feature-inventor init` in a later remediation batch; until then, copy the documented shape above and adapt it for the target repository.
 
+When `indexing.autoPrepareOnPropose` is `true`, an explicit `feature-inventor propose` also refreshes the local commit-pinned index. It attaches a context pack only when the approved queue names exactly one curated feature. It never guesses partial scope, runs an AI engine, changes code, or approves execution. Use `feature-inventor propose --no-auto-index` for a one-off opt-out, or pass `--context-pack PATH` to supply a specific previously generated pack instead.
+
 ### Repository orientation and indexing
 
 `INDEX.md` is the concise committed navigation map. `docs/indexing/features.yml` is the reviewed source-linked feature and flow registry. Together they provide a fast, auditable route from a product capability to its entry point, implementation paths, tests, and risks without treating generated summaries as source of truth.

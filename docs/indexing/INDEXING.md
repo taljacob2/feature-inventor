@@ -111,7 +111,9 @@ The execution runtime must open and verify the linked source files before it mak
 
 ### Optional proposal provenance
 
-`feature-inventor propose --context-pack RELATIVE_JSON_PATH` can record one already-persisted context pack on a new immutable proposal. It requires a fresh snapshot whose target commit equals the proposal's resolved default-branch commit. The stored proposal reference contains only reproducibility metadata: the pack ID, relative JSON and Markdown paths, SHA-256 digest of the JSON artifact, snapshot policy digest, selector, pack kind, and token accounting. It does not copy source excerpts into the proposal.
+When the manifest sets `indexing.autoPrepareOnPropose` to `true`, an explicit `feature-inventor propose` call refreshes the local index from a clean checkout at the resolved proposal commit. If the approved queue identifies **one exact** curated feature by ID, name, or deliberate `feature:` source, it also writes a bounded context pack and records its immutable provenance on the proposal. It does not guess from partial names, create a pack for ambiguous scope, start a runtime, or approve any work. A clean index still refreshes when no exact feature is available, and the proposal records no context pack. Use `feature-inventor propose --no-auto-index` to suppress this local preparation for one proposal.
+
+`feature-inventor propose --context-pack RELATIVE_JSON_PATH` can instead record one already-persisted context pack on a new immutable proposal. It requires a fresh snapshot whose target commit equals the proposal's resolved default-branch commit. The stored proposal reference contains only reproducibility metadata: the pack ID, relative JSON and Markdown paths, SHA-256 digest of the JSON artifact, snapshot policy digest, selector, pack kind, and token accounting. It does not copy source excerpts into the proposal.
 
 > **Trust boundary:** Context-pack provenance is informational design history. It does not satisfy required checks, affect review readiness, authorize a runtime, establish code behavior, or replace the source and artifact evidence gates.
 
@@ -126,12 +128,13 @@ The optional `indexing` section in `feature-inventor.target.json` governs this c
     "historyDays": 90,
     "defaultContextPack": "change",
     "maxEstimatedTokens": 4000,
-    "includeGovernedArtifacts": true
+    "includeGovernedArtifacts": true,
+    "autoPrepareOnPropose": true
   }
 }
 ```
 
-`historyDays` controls only historical Git aggregation. It is never a proxy for production use. `maxEstimatedTokens` is a strict upper bound for a later context selector. `includeGovernedArtifacts` covers only local Feature Inventor proposal, journal, result, and review artifacts. It does not authorize target application telemetry or external data collection.
+`historyDays` controls only historical Git aggregation. It is never a proxy for production use. `maxEstimatedTokens` is a strict upper bound for a later context selector. `includeGovernedArtifacts` covers only local Feature Inventor proposal, journal, result, and review artifacts. It does not authorize target application telemetry or external data collection. `autoPrepareOnPropose` defaults to `false` for compatibility and is an explicit local opt-in. It requires a clean checkout and a resolved default-branch commit; otherwise proposal creation fails rather than writing an index that cannot be tied to the proposal.
 
 ## Implementation and Maintenance Rules
 
