@@ -123,6 +123,7 @@ import {
   withLegacyJsonArgument,
 } from "./cli/terminal.js";
 import { formatCommandHelp, formatTopLevelHelp, formatUnknownHelpTopic } from "./cli/help.js";
+import { formatInitResult, parseInitCommandOptions, runInitCommand } from "./cli/init.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -312,7 +313,7 @@ export async function runDoctor(repoRoot: string, options: { json?: boolean } = 
   let manifest = null;
   let manifestError: string | null = null;
   if (manifestContent === null) {
-    manifestError = `${TARGET_MANIFEST_FILENAME} is required; run \`feature-inventor init\` when it is available`;
+    manifestError = `${TARGET_MANIFEST_FILENAME} is required; run \`feature-inventor init\` to create an explicit local target contract`;
   } else {
     try {
       manifest = parseTargetManifest(manifestContent);
@@ -1891,7 +1892,8 @@ export async function runCli(args: string[] = process.argv.slice(2), defaultCwd:
   // The current renderers remain intentionally unchanged in this foundation
   // release. Resolving terminal capabilities here gives future presenters one
   // tested cross-platform decision point without changing governance behavior.
-  void resolvePresentation(parsed.options, detectTerminalCapabilities());
+  const terminalCapabilities = detectTerminalCapabilities();
+  void resolvePresentation(parsed.options, terminalCapabilities);
 
   if (command === undefined && (rest.includes("--version") || rest.includes("-v"))) {
     printVersion();
@@ -1907,6 +1909,18 @@ export async function runCli(args: string[] = process.argv.slice(2), defaultCwd:
   }
 
   switch (command) {
+    case "init": {
+      const options = parseInitCommandOptions(rest);
+      if (options.json && !parsed.options.nonInteractive) {
+        throw new Error("init with --format json requires --non-interactive so output remains machine-readable");
+      }
+      if (!parsed.options.nonInteractive && !terminalCapabilities.isInteractive) {
+        throw new Error("init requires an interactive terminal; rerun with --non-interactive and explicit --repository, --default-branch, --goal, and --check values");
+      }
+      const result = await runInitCommand(repoRoot, options, parsed.options.nonInteractive);
+      console.log(options.json ? JSON.stringify(result, null, 2) : formatInitResult(result));
+      break;
+    }
     case "status":
       printStatus(repoRoot, { json });
       break;

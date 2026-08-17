@@ -9,6 +9,7 @@ const TOPIC_GROUPS = [
   {
     title: "Start safely",
     commands: [
+      ["init", "Create an explicit local target manifest; guided or scriptable"],
       ["overview", "See repository health, queue, and next safe action"],
       ["doctor", "Validate repository, manifest, Git, and policy prerequisites"],
       ["plan", "Inspect the approved candidate queue without starting work"],
@@ -45,6 +46,15 @@ const TOPIC_GROUPS = [
 ] as const;
 
 const TOPICS: Record<string, HelpTopic> = {
+  init: {
+    name: "init",
+    summary: "Create a local, operator-owned target manifest without starting a runtime.",
+    usage: "feature-inventor init [--repository URL --default-branch BRANCH --goal TEXT --check COMMAND] [--non-interactive] [--force]",
+    examples: [
+      "feature-inventor init",
+      "feature-inventor init --non-interactive --repository https://github.com/OWNER/REPO.git --default-branch main --goal \"Improve onboarding\" --check \"npm test\"",
+    ],
+  },
   overview: {
     name: "overview",
     summary: "Show repository health, the governed queue, recent activity, and the next safe step.",
@@ -102,6 +112,7 @@ export function formatTopLevelHelp(): string {
   lines.push("  --cwd PATH                   Use a repository without changing the shell working directory");
   lines.push("");
   lines.push("EXAMPLES");
+  lines.push("  feature-inventor init");
   lines.push("  feature-inventor overview");
   lines.push("  feature-inventor doctor");
   lines.push("  feature-inventor propose");

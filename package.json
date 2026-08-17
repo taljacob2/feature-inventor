@@ -3,21 +3,49 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A self-hosted, self-growing nightly feature-building loop.",
+  "description": "A governed, evidence-backed autonomous improvement harness for one repository at a time.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/taljacob2/feature-inventor.git"
+  },
+  "homepage": "https://github.com/taljacob2/feature-inventor#readme",
+  "bugs": {
+    "url": "https://github.com/taljacob2/feature-inventor/issues"
+  },
+  "keywords": [
+    "cli",
+    "developer-tools",
+    "governance",
+    "ai-agents",
+    "repository-automation"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "ARCHITECTURE.md",
+    "INDEX.md",
+    "docs/cli"
+  ],
   "bin": {
     "feature-inventor": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "clean": "node scripts/clean-dist.mjs",
+    "build": "npm run clean && tsc",
     "start": "node dist/cli.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "npm run build",
+    "pack:check": "npm pack --dry-run --json"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   },
   "dependencies": {
+    "typescript": "^5.7.0",
     "yaml": "^2.9.0"
   }
 }

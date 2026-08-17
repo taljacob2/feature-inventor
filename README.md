@@ -8,20 +8,25 @@ For the product boundary, runtime architecture, and remediation sequence, see [`
 
 ## Quickstart
 
-Install dependencies and build once:
+Feature Inventor requires Node 22 or later. The repository is package-ready but remains intentionally private in npm metadata until release ownership and licensing are explicitly decided. Install it from source today:
 
 ```sh
+git clone https://github.com/taljacob2/feature-inventor.git
+cd feature-inventor
 npm install
 npm run build
+npm link # optional: exposes `feature-inventor` on your PATH for development
 ```
 
-Then validate the target and orient yourself in the project:
+Then initialize the target repository you want to govern. Run this from that target repository’s root, not from Feature Inventor’s own source directory:
 
 ```sh
-node dist/cli.js doctor
-node dist/cli.js overview
-# or: npm start -- overview
+feature-inventor init
+feature-inventor doctor
+feature-inventor overview
 ```
+
+`init` writes an explicit local target contract and prints the next safe steps. It does not start a runtime, create a proposal, change target source, or schedule background work. For a fully scriptable setup, use `feature-inventor init --non-interactive --repository URL --default-branch BRANCH --goal TEXT --check COMMAND --format json`.
 
 `overview` is the official orientation command. It summarizes the current queue, recent governed runs, and the next safe action. It does not create a proposal or start a runtime. `doctor` is also non-mutating. It validates the target manifest, Git root and origin, current branch, workspace state, declared checks, and the manual scheduling default before any governed run begins.
 
@@ -39,7 +44,7 @@ feature-inventor propose --non-interactive
 
 `--format human|json|plain` selects presentation; `--json` is its compatibility shorthand. `--color auto|always|never` and `--motion auto|reduce|off` configure optional human-facing terminal presentation without polluting JSON. See [`docs/cli/COMMAND_INTERFACE.md`](docs/cli/COMMAND_INTERFACE.md) for the command-interface contract and compatibility policy.
 
-### Installing the `feature-inventor` command globally (optional)
+### Installing the `feature-inventor` command globally for development (optional)
 
 Everything in this doc works without this step — `node dist/cli.js <command>`
 is enough on its own. If you'd rather type the bare `feature-inventor`
@@ -50,6 +55,8 @@ npm link
 ```
 
 This symlinks `feature-inventor` on your PATH to this repo's `dist/cli.js`.
+
+> A public `npm install -g feature-inventor` release is intentionally not available yet. The project now verifies that its restricted production tarball installs and runs correctly, but publication awaits an explicit license, package-ownership, versioning, and release-policy decision.
 Because it's a symlink to this repo — not a copy — **upgrading later is just
 rebuilding, not reinstalling**:
 

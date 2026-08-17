@@ -46,7 +46,7 @@ export function buildDoctorData(input: DoctorInput): DoctorData {
     checks.push({
       id: "target-manifest",
       status: "fail",
-      message: "feature-inventor.target.json is required; run `feature-inventor init` when it is available",
+      message: "feature-inventor.target.json is required; run `feature-inventor init` to create an explicit local target contract",
     });
   } else {
     checks.push({ id: "target-manifest", status: "pass", message: "Target manifest is valid" });
@@ -141,5 +141,10 @@ export function formatDoctor(data: DoctorData): string {
   if (data.target.goals.length > 0) lines.push(`Goals: ${data.target.goals.join("; ")}`);
   lines.push("", "Checks:");
   for (const check of data.checks) lines.push(`  ${icon[check.status]} ${check.id}: ${check.message}`);
+  if (data.target.repositoryUrl === null) {
+    lines.push("", "Next safe step: feature-inventor init");
+  } else if (data.ready) {
+    lines.push("", "Next safe step: feature-inventor overview");
+  }
   return lines.join("\n");
 }

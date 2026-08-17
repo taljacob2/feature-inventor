@@ -4,11 +4,15 @@ features:
     name: Target contract and preflight
     intent: Validate the operator-owned repository contract and local preconditions before governed work begins.
     entryPoints:
+      - src/cli.ts#runCli
       - src/cli.ts#runDoctor
     primaryPaths:
+      - src/cli/init.ts
+      - src/init.ts
       - src/target-manifest.ts
       - src/doctor.ts
     tests:
+      - src/cli/init.test.ts
       - src/target-manifest.test.ts
       - src/doctor.test.ts
     flows:
