@@ -135,6 +135,8 @@ import {
 import { formatCommandHelp, formatTopLevelHelp, formatUnknownHelpTopic } from "./cli/help.js";
 import { formatInitResult, parseInitCommandOptions, runInitCommand } from "./cli/init.js";
 import { generateCompletion, isCompletionShell, SUPPORTED_SHELLS } from "./cli/completion.js";
+import { launchTui } from "./tui/session.js";
+import type { TuiDataSource } from "./tui/types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -321,6 +323,29 @@ export function getRunPlanData(repoRoot: string): RunPlanData {
 export function printRunPlan(repoRoot: string, options: { json?: boolean } = {}): void {
   const data = getRunPlanData(repoRoot);
   console.log(options.json ? JSON.stringify(data, null, 2) : formatRunPlan(data));
+}
+
+function createTuiDataSource(repoRoot: string): TuiDataSource {
+  return {
+    readSnapshot: () => ({ status: getStatusData(repoRoot), refreshedAt: new Date().toISOString() }),
+    readRunDetail: (runId) => {
+      const run = getGovernedRunSummaries(repoRoot).find((candidate) => candidate.runId === runId);
+      if (!run) return null;
+      const journal = readOptionalFile(repoRoot, join(RUNS_DIRECTORY, runId, RUN_JOURNAL_FILENAME));
+      return { run, events: journal ? parseRunJournalEvents(journal) : [] };
+    },
+  };
+}
+
+export async function runTui(repoRoot: string, presentation: ReturnType<typeof resolvePresentation>): Promise<void> {
+  await launchTui({
+    repoRoot,
+    dataSource: createTuiDataSource(repoRoot),
+    colorEnabled: presentation.colorEnabled,
+    unicodeEnabled: presentation.unicodeEnabled,
+    motionEnabled: presentation.motionEnabled,
+    executeCommand: async (command) => runCli([...command, "--cwd", repoRoot], repoRoot),
+  });
 }
 
 async function readGitValue(repoRoot: string, args: string[]): Promise<string | null> {
@@ -2001,7 +2026,7 @@ export async function runCli(args: string[] = process.argv.slice(2), defaultCwd:
   // release. Resolving terminal capabilities here gives future presenters one
   // tested cross-platform decision point without changing governance behavior.
   const terminalCapabilities = detectTerminalCapabilities();
-  void resolvePresentation(parsed.options, terminalCapabilities);
+  const presentation = resolvePresentation(parsed.options, terminalCapabilities);
 
   if (command === undefined && (rest.includes("--version") || rest.includes("-v"))) {
     printVersion();
@@ -2031,6 +2056,13 @@ export async function runCli(args: string[] = process.argv.slice(2), defaultCwd:
     }
     case "completion":
       runCompletion(rest);
+      break;
+    case "tui":
+      if (parsed.options.nonInteractive || parsed.options.format !== "human") {
+        throw new Error("tui requires an interactive human terminal; use `feature-inventor overview --format json|plain` for non-interactive output");
+      }
+      if (rest.length > 0) throw new Error("Usage: feature-inventor tui [--color auto|always|never] [--motion auto|reduce|off] [--cwd PATH]");
+      await runTui(repoRoot, presentation);
       break;
     case "status":
       printStatus(repoRoot, { json });

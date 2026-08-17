@@ -29,6 +29,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
     commands: [
       ["init", "Create an explicit local target manifest; guided or scriptable"],
       ["overview", "See repository health, queue, and next safe action"],
+      ["tui", "Open the optional full-screen interactive dashboard"],
       ["doctor", "Validate repository, manifest, Git, and policy prerequisites"],
       ["plan", "Inspect the approved candidate queue without starting work"],
       ["propose", "Create an immutable governed proposal; no runtime starts"],
@@ -82,6 +83,12 @@ export const COMMAND_TOPICS: Readonly<Record<string, CommandTopic>> = {
     usage: "feature-inventor overview [--format human|json|plain]",
     examples: ["feature-inventor overview", "feature-inventor overview --format json"],
   },
+  tui: {
+    name: "tui",
+    summary: "Open the optional full-screen dashboard in an interactive human terminal.",
+    usage: "feature-inventor tui [--color auto|always|never] [--motion auto|reduce|off] [--cwd PATH]",
+    examples: ["feature-inventor tui", "feature-inventor tui --color never"],
+  },
   doctor: {
     name: "doctor",
     summary: "Run non-mutating preflight checks before planning or launching work.",
@@ -128,7 +135,7 @@ export const COMMAND_TOPICS: Readonly<Record<string, CommandTopic>> = {
 };
 
 export const COMMAND_NAMES = [
-  "init", "overview", "status", "doctor", "docs", "index", "plan", "propose", "approve", "journal", "watch", "recover",
+  "init", "overview", "tui", "status", "doctor", "docs", "index", "plan", "propose", "approve", "journal", "watch", "recover",
   "capture", "verify", "review", "finalize", "run", "manus", "claude", "schedule", "recap", "stop", "daemon", "completion", "help",
 ] as const;
 

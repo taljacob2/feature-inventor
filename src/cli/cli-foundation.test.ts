@@ -62,4 +62,10 @@ describe("runCli command foundation", () => {
     await runCli(["run", "--help"]);
     expect(log.mock.calls[0]![0]).toContain("Feature Inventor run");
   });
+
+  it("rejects TUI use from non-interactive or machine-readable command paths without opening raw terminal mode", async () => {
+    await expect(runCli(["tui", "--non-interactive"])).rejects.toThrow("tui requires an interactive human terminal");
+    await expect(runCli(["tui", "--format", "json"])).rejects.toThrow("tui requires an interactive human terminal");
+    await expect(runCli(["tui", "unexpected"])).rejects.toThrow("Usage: feature-inventor tui");
+  });
 });

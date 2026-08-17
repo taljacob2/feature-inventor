@@ -94,7 +94,7 @@ At that point, the intended user-facing installation command is:
 npm install -g feature-inventor
 ```
 
-Native executables and a full-screen terminal UI are later distribution layers. They must preserve this Node/npm path and the scriptable non-interactive CLI as supported first-class interfaces.
+The optional full-screen terminal UI is now available through `feature-inventor tui`. It preserves this Node/npm path and the scriptable non-interactive CLI as supported first-class interfaces. See [FULL_SCREEN_TUI.md](FULL_SCREEN_TUI.md) for its keyboard controls, typed-confirmation boundaries, and automation fallback. Native executables remain a later distribution layer.
 
 ## Shell Completion
 

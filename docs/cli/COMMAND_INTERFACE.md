@@ -4,7 +4,7 @@ Feature Inventor exposes a governed command-line interface for one target reposi
 
 ## Entry Points
 
-New users should begin with `feature-inventor init`, `feature-inventor overview`, and `feature-inventor doctor`. `init` creates an explicit local target manifest through a guided interactive flow or a fully explicit non-interactive command; it never starts a runtime or creates a proposal. `overview` is the official orientation command. It summarizes the local queue, recent governed runs, and one next safe action. It neither starts a runtime nor creates a proposal. See [INSTALLATION_AND_ONBOARDING.md](INSTALLATION_AND_ONBOARDING.md) for installation, first-run, and automation details.
+New users should begin with `feature-inventor init`, `feature-inventor overview`, and `feature-inventor doctor`. `init` creates an explicit local target manifest through a guided interactive flow or a fully explicit non-interactive command; it never starts a runtime or creates a proposal. `overview` is the official orientation command. It summarizes the local queue, recent governed runs, and one next safe action. It neither starts a runtime nor creates a proposal. `tui` is an optional full-screen human dashboard over the same read-only state; it does not replace `overview` for automation. See [INSTALLATION_AND_ONBOARDING.md](INSTALLATION_AND_ONBOARDING.md) for installation, first-run, and automation details.
 
 The existing `status` command remains a compatibility alias. It preserves the older detailed status renderer and its existing JSON contract. Runtime-specific aliases, including `manus run` and `claude run`, remain available; the runtime-neutral `run --runtime ID --run RUN_ID` command is the primary execution path. When an immutable proposal requires human approval, `run` fails closed until a matching `approve` record has been written and journaled. `completion` prints a generated script only; installation, sourcing, and profile modification remain explicit operator actions documented in [INSTALLATION_AND_ONBOARDING.md](INSTALLATION_AND_ONBOARDING.md).
 
@@ -13,6 +13,7 @@ The existing `status` command remains a compatibility alias. It preserves the ol
 | Create the local target contract | `feature-inventor init` |
 | Print a reviewed shell completion script | `feature-inventor completion bash|zsh|fish|powershell` |
 | Understand the repository state | `feature-inventor overview` |
+| Open the optional full-screen human dashboard | `feature-inventor tui` |
 | Validate prerequisites without changes | `feature-inventor doctor` |
 | Inspect candidate work | `feature-inventor plan` |
 | Create a reviewable proposal | `feature-inventor propose` |
@@ -35,8 +36,8 @@ Global controls can appear before or after the command. They are removed before 
 |---|---|
 | `--format human|json|plain` | Select the renderer. `json` is stable machine-oriented output; `plain` is a low-format human fallback. |
 | `--json` | Compatibility shorthand for `--format json`. Do not combine it with `--format`. |
-| `--color auto|always|never` | Configure future human-color rendering without changing JSON or plain output. |
-| `--motion auto|reduce|off` | Configure future optional progress motion. Motion is disabled in JSON and plain modes. |
+| `--color auto|always|never` | Configure human color rendering, including the optional TUI, without changing JSON or plain output. |
+| `--motion auto|reduce|off` | Configure optional progress motion. The current TUI is static and therefore does not animate. Motion is disabled in JSON and plain modes. |
 | `--non-interactive` | Declare that no prompt may be used when future guided commands introduce prompts. |
 | `--cwd PATH` | Target a repository without requiring shell-specific directory changes. |
 
@@ -44,12 +45,12 @@ All JSON output remains free of progress redraws and ANSI styling. The CLI detec
 
 ## Help and Discoverability
 
-`feature-inventor help` and `feature-inventor --help` display grouped discovery-focused help. `feature-inventor help propose`, `feature-inventor propose --help`, `feature-inventor help approve`, and `feature-inventor approve --help` provide focused examples. Help is non-mutating and never launches a runtime.
+`feature-inventor help` and `feature-inventor --help` display grouped discovery-focused help. `feature-inventor help propose`, `feature-inventor propose --help`, `feature-inventor help approve`, `feature-inventor approve --help`, and `feature-inventor help tui` provide focused examples. Help is non-mutating and never launches a runtime.
 
 ## Compatibility Commitment
 
 The first CLI modernization release preserves existing command names, proposal behavior, runtime adapter routing, index behavior, journal behavior, and JSON result structures. The new command foundation is additive. Compatibility aliases will remain documented through at least the first major public CLI release.
 
-## Full-Screen TUI Status
+## Full-Screen TUI
 
-A full-screen `feature-inventor tui` command is intentionally not included in this foundation. A dashboard may be added after the command core, package distribution, shell completions, non-interactive path, and cross-platform acceptance matrix are stable. It will be optional and will never be the only way to inspect or authorize governed work.
+`feature-inventor tui` is an optional keyboard-first dashboard for an interactive human terminal. It presents the same queue, governed-run, approval, and journal state used by `overview` and `journal`. It refuses non-interactive, JSON, and plain modes; use `overview --format json|plain` for those use cases. It requires typed confirmation for its two local actions, `index build` and `propose`, and does not expose runtime launch, reviewer approval, verification, review, finalization, scheduler, remote, deployment, or publication actions. See [FULL_SCREEN_TUI.md](FULL_SCREEN_TUI.md) for the complete operating and accessibility guide.
