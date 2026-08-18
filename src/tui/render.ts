@@ -75,8 +75,9 @@ function dashboardLines(state: TuiState): string[] {
   }
 
   lines.push("", style("SAFE ACTIONS", [ANSI.bold], state.colorEnabled));
-  lines.push("  [R] Inspect runs   [U] Refresh   [B] Build index   [P] Propose");
-  lines.push(style("Build and propose require typed confirmation. Runtime launches remain command-line only.", [ANSI.dim], state.colorEnabled));
+  lines.push("  [C] Commands   [G] Run selected   [A] Approve selected   [S] Stop   [R] Runs");
+  lines.push("  [U] Refresh    [B] Build index    [P] Propose");
+  lines.push(style("C opens the governed command center. Lifecycle-changing commands require typed confirmation.", [ANSI.dim], state.colorEnabled));
   return lines;
 }
 
@@ -118,12 +119,33 @@ function detailLines(state: TuiState): string[] {
   return lines;
 }
 
+function commandLines(state: TuiState): string[] {
+  const width = state.columns;
+  return [
+    style("GOVERNED COMMAND CENTER", [ANSI.bold, ANSI.cyan], state.colorEnabled),
+    divider(width, state.unicodeEnabled),
+    "Enter a supported Feature Inventor command without the `feature-inventor` prefix.",
+    "Examples: run --runtime manus --run RUN_ID | stop | approve RUN_ID --reviewer NAME --note \"Reviewed scope.\"",
+    "Shortcuts: G pre-fills Manus run for the selected run, A pre-fills approval, and S pre-fills stop.",
+    "",
+    `> ${state.commandInput}`,
+    "",
+    style("Enter previews the exact command. Lifecycle-changing commands require a typed EXECUTE phrase.", [ANSI.bold], state.colorEnabled),
+    style("No shell syntax and no --cwd override are accepted. Existing CLI approvals and policy checks are never bypassed.", [ANSI.dim], state.colorEnabled),
+    style("Esc returns to the dashboard. H shows keyboard help.", [ANSI.dim], state.colorEnabled),
+  ];
+}
+
 function helpLines(state: TuiState): string[] {
   const width = state.columns;
   return [
     style("KEYBOARD HELP", [ANSI.bold, ANSI.cyan], state.colorEnabled),
     divider(width, state.unicodeEnabled),
     "D  Dashboard",
+    "C  Command center for supported Feature Inventor commands",
+    "G  Pre-fill Manus run for the selected governed run",
+    "A  Pre-fill approval for the selected governed run",
+    "S  Pre-fill stop request",
     "R  Governed runs",
     "Up/Down  Select a run",
     "Enter  Open selected run detail",
@@ -132,8 +154,8 @@ function helpLines(state: TuiState): string[] {
     "P  Create a proposal after typing CREATE PROPOSAL",
     "Q or Ctrl+C  Exit the TUI",
     "",
-    style("Runtime launch, approval, verification, review, and finalization remain explicit CLI commands.", [ANSI.bold], state.colorEnabled),
-    style("This preserves existing governance checks and prevents the dashboard from becoming an unattended executor.", [ANSI.dim], state.colorEnabled),
+    style("The command center can launch the full supported CLI lifecycle, including run and stop, after command preview and required typed confirmation.", [ANSI.bold], state.colorEnabled),
+    style("It passes argv directly to Feature Inventor. It does not invoke a shell or bypass existing governance checks.", [ANSI.dim], state.colorEnabled),
   ];
 }
 
@@ -144,14 +166,14 @@ function confirmationLines(state: TuiState): string[] {
   const action = confirmation.action;
   const complete = confirmation.typedValue === action.confirmationPhrase;
   return [
-    style("CONFIRM LOCAL ACTION", [ANSI.bold, ANSI.yellow], state.colorEnabled),
+    style("CONFIRM COMMAND", [ANSI.bold, ANSI.yellow], state.colorEnabled),
     divider(width, state.unicodeEnabled),
     style(action.label, [ANSI.bold], state.colorEnabled),
     action.description,
     "",
     `Type ${style(action.confirmationPhrase, [ANSI.bold], state.colorEnabled)} and press Enter to continue:`,
     `> ${confirmation.typedValue}`,
-    complete ? style("Confirmation phrase matches. Enter will return to the normal CLI command.", [ANSI.green], state.colorEnabled) : style("Esc cancels. This action does not launch a runtime.", [ANSI.dim], state.colorEnabled),
+    complete ? style("Confirmation phrase matches. Enter will return to the normal CLI command.", [ANSI.green], state.colorEnabled) : style("Esc cancels. Existing CLI policy checks still apply after confirmation.", [ANSI.dim], state.colorEnabled),
   ];
 }
 
@@ -173,16 +195,18 @@ export function renderTuiFrame(state: TuiState): string {
         ? detailLines(state)
         : state.view === "help"
           ? helpLines(state)
-          : state.view === "confirm"
+          : state.view === "command"
+            ? commandLines(state)
+            : state.view === "confirm"
             ? confirmationLines(state)
             : dashboardLines(state);
 
   const header = style(
-    padded("Feature Inventor  |  D dashboard  R runs  H help  U refresh  Q quit", state.columns, state.unicodeEnabled),
+    padded("Feature Inventor  |  D dashboard  C commands  R runs  H help  U refresh  Q quit", state.columns, state.unicodeEnabled),
     [ANSI.bold],
     state.colorEnabled,
   );
-  const footer = state.notice ? style(truncate(state.notice, state.columns, state.unicodeEnabled), [ANSI.yellow], state.colorEnabled) : style("Read-only dashboard. Mutating actions require typed confirmation.", [ANSI.dim], state.colorEnabled);
+  const footer = state.notice ? style(truncate(state.notice, state.columns, state.unicodeEnabled), [ANSI.yellow], state.colorEnabled) : style("Command center launches CLI argv directly; lifecycle-changing commands require typed confirmation.", [ANSI.dim], state.colorEnabled);
   const availableLines = Math.max(1, state.rows - 3);
   const visible = lines.slice(0, availableLines).map((line) => truncate(line, state.columns, state.unicodeEnabled));
   return `${header}\n${divider(state.columns, state.unicodeEnabled)}\n${visible.join("\n")}\n${footer}`;

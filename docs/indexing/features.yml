@@ -116,13 +116,16 @@ features:
     entryPoints:
       - src/cli.ts#runTui
     primaryPaths:
+      - src/tui/command-center.ts
       - src/tui/session.ts
       - src/tui/render.ts
       - src/tui/types.ts
       - src/cli/terminal.ts
       - src/cli/command-spec.ts
     tests:
+      - src/tui/command-center.test.ts
       - src/tui/render.test.ts
+      - src/tui/session.test.ts
       - src/cli/cli-foundation.test.ts
       - src/cli/terminal.test.ts
     flows:
@@ -236,6 +239,8 @@ flows:
         role: command-bridge
       - source: src/tui/session.ts#launchTui
         role: terminal-session-control
+      - source: src/tui/command-center.ts#parseTuiCommand
+        role: argv-validation-and-confirmation-policy
       - source: src/tui/render.ts#renderTuiFrame
         role: read-only-presentation
       - source: src/cli.ts#getStatusData

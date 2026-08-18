@@ -41,6 +41,7 @@ function state(overrides: Partial<TuiState> = {}): TuiState {
     snapshot: { status: STATUS, refreshedAt: "2026-08-17T00:00:00.000Z" },
     detail: null,
     confirmation: null,
+    commandInput: "",
     notice: null,
     columns: 100,
     rows: 30,
@@ -57,7 +58,10 @@ describe("full-screen TUI renderer", () => {
     expect(frame).toContain("Improve review ergonomics");
     expect(frame).toContain("run-20260817-001");
     expect(frame).toContain("approved by maintainer");
-    expect(frame).toContain("Build and propose require typed confirmation.");
+    expect(frame).toContain("C opens the governed command center");
+    expect(frame).toContain("[G] Run selected");
+    expect(frame).toContain("[A] Approve selected");
+    expect(frame).toContain("[S] Stop");
     expect(frame).not.toContain("\u001B[31m");
   });
 
@@ -83,9 +87,14 @@ describe("full-screen TUI renderer", () => {
         typedValue: "CREATE",
       },
     }));
-    expect(confirm).toContain("CONFIRM LOCAL ACTION");
+    expect(confirm).toContain("CONFIRM COMMAND");
     expect(confirm).toContain("CREATE PROPOSAL");
     expect(confirm).toContain("Esc cancels");
+
+    const commands = renderTuiFrame(state({ view: "command", commandInput: "run --runtime manus --run run-1" }));
+    expect(commands).toContain("GOVERNED COMMAND CENTER");
+    expect(commands).toContain("run --runtime manus --run run-1");
+    expect(commands).toContain("No shell syntax and no --cwd override");
 
     const compact = renderTuiFrame(state({ columns: 60, rows: 20 }));
     expect(compact).toContain("resize to at least 80x24");
