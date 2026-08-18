@@ -59,7 +59,7 @@ The curated registry contains the machine-validated version of these flow defini
 | New product capability | `docs/indexing/features.yml` | Every declared path, symbol, test, and flow reference must pass `docs validate`. |
 | New language extractor | The indexing extractor contract under `src/indexing/` | Generated snapshots must be deterministic, commit-pinned, and explicit about incomplete coverage. |
 | Durable scheduling | Proposal-pinned schedule handoff | A handoff records an exact command but does not start a scheduler or execute a run itself. |
-| Full-screen terminal UI | `src/tui/` presentation and session contracts | The optional dashboard is keyboard-first, preserves the non-interactive CLI, and exposes only typed-confirmation local actions. |
+| Full-screen terminal UI | `src/tui/` presentation, command-center, and session contracts | The optional keyboard-first command center preserves the non-interactive CLI, passes validated argv directly to established commands, requires typed confirmation for lifecycle-changing actions, and never invokes a shell. |
 
 ## Indexing Status
 

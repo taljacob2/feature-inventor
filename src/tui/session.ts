@@ -1,6 +1,7 @@
 import { emitKeypressEvents } from "node:readline";
 import { renderTuiFrame } from "./render.js";
-import { TUI_MUTATION_ACTIONS, type TuiLaunchOptions, type TuiState } from "./types.js";
+import { parseTuiCommand, toTuiCommandAction } from "./command-center.js";
+import { TUI_MUTATION_ACTIONS, type TuiLaunchOptions, type TuiMutationAction, type TuiState } from "./types.js";
 
 type Key = { name?: string; ctrl?: boolean; sequence?: string };
 
@@ -19,6 +20,7 @@ function createState(options: TuiLaunchOptions): TuiState {
     snapshot: options.dataSource.readSnapshot(),
     detail: null,
     confirmation: null,
+    commandInput: "",
     notice: null,
     columns: size.columns,
     rows: size.rows,
@@ -47,6 +49,12 @@ function refresh(state: TuiState, options: TuiLaunchOptions): void {
   clampRunSelection(state);
   state.detail = state.view === "detail" && selectedRunId(state) ? options.dataSource.readRunDetail(selectedRunId(state)!) : null;
   state.notice = `Refreshed ${state.snapshot.refreshedAt}`;
+}
+
+function openCommandCenter(state: TuiState, commandInput = ""): void {
+  state.commandInput = commandInput;
+  state.view = "command";
+  state.notice = null;
 }
 
 function beginConfirmation(state: TuiState, actionId: "index-build" | "propose"): void {
@@ -115,12 +123,11 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
     render(state);
   };
 
-  const executeConfirmation = async (): Promise<void> => {
-    const confirmation = state.confirmation;
-    if (!confirmation || confirmation.typedValue !== confirmation.action.confirmationPhrase) return;
+  const executeAction = async (action: TuiMutationAction): Promise<void> => {
     state.confirmation = null;
+    state.commandInput = "";
     state.view = "dashboard";
-    state.notice = `Running: feature-inventor ${confirmation.action.command.join(" ")}`;
+    state.notice = `Running: feature-inventor ${action.command.join(" ")}`;
     render(state);
 
     stdin.off("keypress", onKeypress);
@@ -129,8 +136,8 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
     stdin.pause();
     exitAlternateScreen();
     try {
-      await options.executeCommand(confirmation.action.command);
-      state.notice = `Completed: feature-inventor ${confirmation.action.command.join(" ")}. Review terminal scrollback for command output.`;
+      await options.executeCommand(action.command);
+      state.notice = `Completed: feature-inventor ${action.command.join(" ")}. Review terminal scrollback for command output.`;
     } catch (error) {
       state.notice = `Command failed: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
@@ -146,6 +153,12 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
     }
   };
 
+  const executeConfirmation = async (): Promise<void> => {
+    const confirmation = state.confirmation;
+    if (!confirmation || confirmation.typedValue !== confirmation.action.confirmationPhrase) return;
+    await executeAction(confirmation.action);
+  };
+
   const onKeypress = (input: string | undefined, key: Key = {}): void => {
     if (handling || !active) return;
     handling = true;
@@ -155,10 +168,39 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
           finish();
           return;
         }
-        if (key.name === "q" && state.view !== "confirm") {
+        if (key.name === "q" && state.view !== "confirm" && (state.view !== "command" || state.commandInput.length === 0)) {
           finish();
           return;
         }
+        if (state.view === "command") {
+          if (key.name === "escape") {
+            state.commandInput = "";
+            state.view = "dashboard";
+            state.notice = "Command entry cancelled.";
+          } else if (key.name === "backspace" || key.name === "delete") {
+            state.commandInput = state.commandInput.slice(0, -1);
+          } else if (key.name === "return" || key.name === "enter") {
+            try {
+              const parsed = parseTuiCommand(state.commandInput);
+              const action = toTuiCommandAction(parsed);
+              if (parsed.requiresConfirmation) {
+                state.confirmation = { action, typedValue: "" };
+                state.view = "confirm";
+                state.notice = `Preview: feature-inventor ${action.command.join(" ")}`;
+              } else {
+                await executeAction(action);
+                return;
+              }
+            } catch (error) {
+              state.notice = error instanceof Error ? error.message : String(error);
+            }
+          } else if (isPrintableKeypressInput(input)) {
+            state.commandInput += input;
+          }
+          render(state);
+          return;
+        }
+
         if (state.view === "confirm") {
           if (key.name === "escape") {
             state.confirmation = null;
@@ -179,6 +221,14 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
         if (key.name === "d") {
           state.view = "dashboard";
           state.detail = null;
+        } else if (key.name === "c") {
+          openCommandCenter(state);
+        } else if (key.name === "g" && selectedRunId(state)) {
+          openCommandCenter(state, `run --runtime manus --run ${selectedRunId(state)}`);
+        } else if (key.name === "a" && selectedRunId(state)) {
+          openCommandCenter(state, `approve ${selectedRunId(state)} --reviewer NAME --note \"Reviewed scope and checks.\"`);
+        } else if (key.name === "s") {
+          openCommandCenter(state, "stop");
         } else if (key.name === "r") {
           state.view = "runs";
           clampRunSelection(state);

@@ -1,7 +1,7 @@
 import type { GovernedRunStatus, StatusData } from "../cli.js";
 import type { RunJournalEvent } from "../run-journal.js";
 
-export type TuiView = "dashboard" | "runs" | "detail" | "help" | "confirm";
+export type TuiView = "dashboard" | "runs" | "detail" | "help" | "command" | "confirm";
 
 export interface TuiRunDetail {
   run: GovernedRunStatus;
@@ -19,7 +19,7 @@ export interface TuiDataSource {
 }
 
 export interface TuiMutationAction {
-  id: "index-build" | "propose";
+  id: string;
   label: string;
   description: string;
   confirmationPhrase: string;
@@ -37,6 +37,7 @@ export interface TuiState {
   snapshot: TuiSnapshot;
   detail: TuiRunDetail | null;
   confirmation: TuiConfirmation | null;
+  commandInput: string;
   notice: string | null;
   columns: number;
   rows: number;
