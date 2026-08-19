@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isEnterKeypress, isPrintableKeypressInput } from "./session.js";
+import { isEnterKeypress, isPrintableKeypressInput, isRawEnterInput } from "./session.js";
 
 describe("TUI keypress input safety", () => {
   it("ignores an undefined Windows keypress payload without throwing or treating it as confirmation text", () => {
@@ -26,5 +26,17 @@ describe("TUI keypress input safety", () => {
     expect(isEnterKeypress(undefined, { sequence: "\n" })).toBe(true);
     expect(isEnterKeypress(undefined, { name: "left", sequence: "\u001b[D" })).toBe(false);
     expect(isEnterKeypress("B", { name: "b" })).toBe(false);
+  });
+
+  it("recognizes raw terminal Enter payloads for the deferred palette fallback only", () => {
+    expect(isRawEnterInput("\r")).toBe(true);
+    expect(isRawEnterInput("\n")).toBe(true);
+    expect(isRawEnterInput("\r\n")).toBe(true);
+    expect(isRawEnterInput(Buffer.from("\r"))).toBe(true);
+    expect(isRawEnterInput(Buffer.from("\n"))).toBe(true);
+    expect(isRawEnterInput(Buffer.from("\r\n"))).toBe(true);
+    expect(isRawEnterInput(Buffer.from("\u001b[D"))).toBe(false);
+    expect(isRawEnterInput("overview")).toBe(false);
+    expect(isRawEnterInput(undefined)).toBe(false);
   });
 });

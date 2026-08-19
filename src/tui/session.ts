@@ -117,6 +117,18 @@ export function isEnterKeypress(input: unknown, key: Key = {}): boolean {
 }
 
 /**
+ * Some Windows raw-mode terminals emit Enter through stdin data without a
+ * usable keypress object. The controller uses this only as a deferred palette
+ * fallback after normal keypress processing has had an opportunity to act.
+ */
+export function isRawEnterInput(chunk: unknown): boolean {
+  if (typeof chunk === "string") return chunk === "\r" || chunk === "\n" || chunk === "\r\n";
+  if (!Buffer.isBuffer(chunk)) return false;
+  return (chunk.length === 1 && (chunk[0] === 0x0d || chunk[0] === 0x0a))
+    || (chunk.length === 2 && chunk[0] === 0x0d && chunk[1] === 0x0a);
+}
+
+/**
  * Starts the optional interactive workspace. The controller owns terminal
  * input and rendering only; all repository work remains in the established
  * command implementation supplied by the caller.
@@ -134,6 +146,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
 
   const cleanup = (): void => {
     stdin.off("keypress", onKeypress);
+    stdin.off("data", onData);
     process.stdout.off("resize", onResize);
     if (stdin.isRaw) stdin.setRawMode(false);
     stdin.pause();
@@ -162,6 +175,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
     render(state);
 
     stdin.off("keypress", onKeypress);
+    stdin.off("data", onData);
     process.stdout.off("resize", onResize);
     if (stdin.isRaw) stdin.setRawMode(false);
     stdin.pause();
@@ -178,6 +192,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
       stdin.setRawMode(true);
       stdin.resume();
       stdin.on("keypress", onKeypress);
+      stdin.on("data", onData);
       process.stdout.on("resize", onResize);
       refresh(state, options);
       render(state);
@@ -234,6 +249,15 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
       return;
     }
     openCommandEditor(state, `run --runtime manus --run ${runId}`);
+  };
+
+  const onData = (chunk: unknown): void => {
+    if (!isRawEnterInput(chunk)) return;
+    setImmediate(() => {
+      if (!active || handling || state.view !== "palette") return;
+      openSelectedPaletteCommand();
+      render(state);
+    });
   };
 
   const advanceWorkflow = (step: string): void => {
@@ -367,6 +391,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
   stdin.setRawMode(true);
   stdin.resume();
   stdin.on("keypress", onKeypress);
+  stdin.on("data", onData);
   process.stdout.on("resize", onResize);
   render(state);
 
