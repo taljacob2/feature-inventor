@@ -12,7 +12,7 @@ This file is the short entry point for developers and execution runtimes. It doe
 | Install and initialize a target repository | [docs/cli/INSTALLATION_AND_ONBOARDING.md](docs/cli/INSTALLATION_AND_ONBOARDING.md), then `feature-inventor init` |
 | Prepare a release artifact or review the guarded public npm path | [RELEASING.md](RELEASING.md), then `npm run release:dry-run` |
 | Orient a new operator without starting work | `feature-inventor overview`, then [docs/cli/COMMAND_INTERFACE.md](docs/cli/COMMAND_INTERFACE.md) |
-| Open the optional full-screen dashboard | `feature-inventor tui`, then [docs/cli/FULL_SCREEN_TUI.md](docs/cli/FULL_SCREEN_TUI.md) |
+| Open the optional guided terminal workspace | `feature-inventor tui`, then [docs/cli/FULL_SCREEN_TUI.md](docs/cli/FULL_SCREEN_TUI.md) |
 | Review and authorize a protected proposal | [docs/cli/HUMAN_REVIEW_GUIDE.md](docs/cli/HUMAN_REVIEW_GUIDE.md), then `feature-inventor approve RUN_ID --reviewer NAME --note TEXT` |
 | Check a target repository before governed work | `feature-inventor doctor` and [src/doctor.ts](src/doctor.ts) |
 | See the operator-owned target contract | [feature-inventor.target.json](feature-inventor.target.json) and [src/target-manifest.ts](src/target-manifest.ts) |
@@ -44,7 +44,7 @@ The curated registry contains the machine-validated version of these flow defini
 
 | Area | Responsibility | Primary paths |
 |---|---|---|
-| CLI and operator workflow | Parses commands, provides guided and scriptable initialization, provides an optional keyboard-first full-screen dashboard, generates shell completions from one shared command vocabulary, exposes stable human/JSON/plain presentation controls, and routes non-mutating inspection, approval, governed proposal, execution, and review operations. | `src/cli.ts`, `src/cli/init.ts`, `src/init.ts`, `src/cli/command-spec.ts`, `src/cli/completion.ts`, `src/cli/terminal.ts`, `src/cli/help.ts`, `src/tui/`, [command guide](docs/cli/COMMAND_INTERFACE.md), [TUI guide](docs/cli/FULL_SCREEN_TUI.md), [review guide](docs/cli/HUMAN_REVIEW_GUIDE.md), [installation guide](docs/cli/INSTALLATION_AND_ONBOARDING.md) |
+| CLI and operator workflow | Parses commands, provides guided and scriptable initialization, provides an optional keyboard-first progressive workspace with newcomer journeys and a searchable advanced palette, generates shell completions from one shared command vocabulary, exposes stable human/JSON/plain presentation controls, and routes non-mutating inspection, approval, governed proposal, execution, and review operations. | `src/cli.ts`, `src/cli/init.ts`, `src/init.ts`, `src/cli/command-spec.ts`, `src/cli/completion.ts`, `src/cli/terminal.ts`, `src/cli/help.ts`, `src/tui/`, [command guide](docs/cli/COMMAND_INTERFACE.md), [TUI guide](docs/cli/FULL_SCREEN_TUI.md), [review guide](docs/cli/HUMAN_REVIEW_GUIDE.md), [installation guide](docs/cli/INSTALLATION_AND_ONBOARDING.md) |
 | Governance artifacts | Defines immutable proposals, proposal-bound reviewer approvals, append-only journals, structured results, and review packets. | `src/run-proposal.ts`, `src/run-approval.ts`, `src/run-journal.ts`, `src/runtime-result.ts`, `src/review-packet.ts` |
 | Runtime integration | Resolves registered providers and normalizes preflight, launch, and optional observation. | `src/runtimes/`, `src/core/governed-run-service.ts` |
 | Target contract | Validates the repository identity, operator goals, checks, protected paths, review policy, schedule, and index policy. | `src/target-manifest.ts`, `feature-inventor.target.json` |
@@ -59,7 +59,7 @@ The curated registry contains the machine-validated version of these flow defini
 | New product capability | `docs/indexing/features.yml` | Every declared path, symbol, test, and flow reference must pass `docs validate`. |
 | New language extractor | The indexing extractor contract under `src/indexing/` | Generated snapshots must be deterministic, commit-pinned, and explicit about incomplete coverage. |
 | Durable scheduling | Proposal-pinned schedule handoff | A handoff records an exact command but does not start a scheduler or execute a run itself. |
-| Full-screen terminal UI | `src/tui/` presentation, command-center, and session contracts | The optional keyboard-first command center preserves the non-interactive CLI, passes validated argv directly to established commands, requires typed confirmation for lifecycle-changing actions, and never invokes a shell. |
+| Full-screen terminal UI | `src/tui/` progressive presentation, palette, and session contracts | The optional keyboard-first workspace provides a calm next-step home, guided journeys, searchable advanced discovery, validated argv handoff, typed confirmation for lifecycle-changing actions, and no shell execution. |
 
 ## Indexing Status
 

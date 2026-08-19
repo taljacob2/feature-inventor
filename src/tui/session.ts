@@ -1,7 +1,7 @@
 import { emitKeypressEvents } from "node:readline";
+import { filterTuiCommandCatalog, parseTuiCommand, toTuiCommandAction } from "./command-center.js";
 import { renderTuiFrame } from "./render.js";
-import { parseTuiCommand, toTuiCommandAction } from "./command-center.js";
-import { TUI_MUTATION_ACTIONS, type TuiLaunchOptions, type TuiMutationAction, type TuiState } from "./types.js";
+import { type TuiLaunchOptions, type TuiMutationAction, type TuiState, type TuiWorkflow } from "./types.js";
 
 type Key = { name?: string; ctrl?: boolean; sequence?: string };
 
@@ -15,11 +15,14 @@ function dimensions(): { columns: number; rows: number } {
 function createState(options: TuiLaunchOptions): TuiState {
   const size = dimensions();
   return {
-    view: "dashboard",
+    view: "home",
+    workflow: null,
     selectedRunIndex: 0,
+    selectedPaletteIndex: 0,
     snapshot: options.dataSource.readSnapshot(),
     detail: null,
     confirmation: null,
+    paletteQuery: "",
     commandInput: "",
     notice: null,
     columns: size.columns,
@@ -38,6 +41,11 @@ function clampRunSelection(state: TuiState): void {
   state.selectedRunIndex = count === 0 ? 0 : Math.min(Math.max(0, state.selectedRunIndex), count - 1);
 }
 
+function clampPaletteSelection(state: TuiState): void {
+  const count = filterTuiCommandCatalog(state.paletteQuery).length;
+  state.selectedPaletteIndex = count === 0 ? 0 : Math.min(Math.max(0, state.selectedPaletteIndex), count - 1);
+}
+
 function updateDimensions(state: TuiState): void {
   const size = dimensions();
   state.columns = size.columns;
@@ -47,21 +55,34 @@ function updateDimensions(state: TuiState): void {
 function refresh(state: TuiState, options: TuiLaunchOptions): void {
   state.snapshot = options.dataSource.readSnapshot();
   clampRunSelection(state);
-  state.detail = state.view === "detail" && selectedRunId(state) ? options.dataSource.readRunDetail(selectedRunId(state)!) : null;
+  if (state.view === "detail" && selectedRunId(state)) state.detail = options.dataSource.readRunDetail(selectedRunId(state)!);
   state.notice = `Refreshed ${state.snapshot.refreshedAt}`;
 }
 
-function openCommandCenter(state: TuiState, commandInput = ""): void {
-  state.commandInput = commandInput;
-  state.view = "command";
+function openHome(state: TuiState): void {
+  state.view = "home";
+  state.workflow = null;
+  state.detail = null;
+  state.confirmation = null;
   state.notice = null;
 }
 
-function beginConfirmation(state: TuiState, actionId: "index-build" | "propose"): void {
-  const action = TUI_MUTATION_ACTIONS.find((candidate) => candidate.id === actionId);
-  if (!action) return;
-  state.confirmation = { action, typedValue: "" };
-  state.view = "confirm";
+function openWorkflow(state: TuiState, workflow: TuiWorkflow): void {
+  state.view = "workflow";
+  state.workflow = workflow;
+  state.notice = null;
+}
+
+function openPalette(state: TuiState, query = ""): void {
+  state.view = "palette";
+  state.paletteQuery = query;
+  state.selectedPaletteIndex = 0;
+  state.notice = null;
+}
+
+function openCommandEditor(state: TuiState, commandInput = ""): void {
+  state.view = "command";
+  state.commandInput = commandInput;
   state.notice = null;
 }
 
@@ -87,9 +108,9 @@ export function isPrintableKeypressInput(input: unknown): input is string {
 }
 
 /**
- * Starts an optional interactive presentation layer. The controller owns only
- * terminal input and rendering; repository operations are supplied by the
- * caller so established CLI command contracts remain the sole action path.
+ * Starts the optional interactive workspace. The controller owns terminal
+ * input and rendering only; all repository work remains in the established
+ * command implementation supplied by the caller.
  */
 export async function launchTui(options: TuiLaunchOptions): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY || typeof process.stdin.setRawMode !== "function") {
@@ -126,7 +147,8 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
   const executeAction = async (action: TuiMutationAction): Promise<void> => {
     state.confirmation = null;
     state.commandInput = "";
-    state.view = "dashboard";
+    state.view = "home";
+    state.workflow = null;
     state.notice = `Running: feature-inventor ${action.command.join(" ")}`;
     render(state);
 
@@ -153,10 +175,73 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
     }
   };
 
+  const previewCommand = async (): Promise<void> => {
+    try {
+      const parsed = parseTuiCommand(state.commandInput);
+      const action = toTuiCommandAction(parsed);
+      if (parsed.requiresConfirmation) {
+        state.confirmation = { action, typedValue: "" };
+        state.view = "confirm";
+        state.notice = `Preview: feature-inventor ${action.command.join(" ")}`;
+      } else {
+        await executeAction(action);
+      }
+    } catch (error) {
+      state.notice = error instanceof Error ? error.message : String(error);
+    }
+  };
+
   const executeConfirmation = async (): Promise<void> => {
     const confirmation = state.confirmation;
     if (!confirmation || confirmation.typedValue !== confirmation.action.confirmationPhrase) return;
     await executeAction(confirmation.action);
+  };
+
+  const openSelectedPaletteCommand = (): void => {
+    const command = filterTuiCommandCatalog(state.paletteQuery)[state.selectedPaletteIndex];
+    if (!command) return;
+    if (command.destination === "runs") {
+      state.view = "runs";
+      state.notice = null;
+      clampRunSelection(state);
+      return;
+    }
+    openCommandEditor(state, command.commandInput ?? "");
+  };
+
+  const openSelectedRunAction = (action: "approve" | "run" | "stop"): void => {
+    const runId = selectedRunId(state);
+    if (action === "stop") {
+      openCommandEditor(state, "stop");
+      return;
+    }
+    if (!runId) {
+      openPalette(state, action);
+      state.notice = "Choose a command template, then provide the required run identifier.";
+      return;
+    }
+    if (action === "approve") {
+      openCommandEditor(state, `approve ${runId} --reviewer NAME --note \"Reviewed scope and checks.\"`);
+      return;
+    }
+    openCommandEditor(state, `run --runtime manus --run ${runId}`);
+  };
+
+  const advanceWorkflow = (step: string): void => {
+    if (state.workflow === "plan") {
+      if (step === "1") openCommandEditor(state, "plan");
+      else if (step === "2") openCommandEditor(state, "index build");
+      else if (step === "3") openCommandEditor(state, "propose");
+      return;
+    }
+    if (state.workflow === "govern") {
+      if (step === "1") {
+        state.view = "runs";
+        clampRunSelection(state);
+      } else if (step === "2") openSelectedRunAction("approve");
+      else if (step === "3") openSelectedRunAction("run");
+      else if (step === "4") openCommandEditor(state, "verify --run RUN_ID --check \"npm test\"");
+    }
   };
 
   const onKeypress = (input: string | undefined, key: Key = {}): void => {
@@ -168,35 +253,39 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
           finish();
           return;
         }
-        if (key.name === "q" && state.view !== "confirm" && (state.view !== "command" || state.commandInput.length === 0)) {
+        if (key.name === "q" && state.view !== "command" && state.view !== "confirm") {
           finish();
           return;
         }
-        if (state.view === "command") {
-          if (key.name === "escape") {
-            state.commandInput = "";
-            state.view = "dashboard";
-            state.notice = "Command entry cancelled.";
-          } else if (key.name === "backspace" || key.name === "delete") {
-            state.commandInput = state.commandInput.slice(0, -1);
+
+        if (state.view === "palette") {
+          if (key.name === "escape") openHome(state);
+          else if (key.name === "backspace" || key.name === "delete") {
+            state.paletteQuery = state.paletteQuery.slice(0, -1);
+            clampPaletteSelection(state);
+          } else if (key.name === "up") {
+            state.selectedPaletteIndex -= 1;
+            clampPaletteSelection(state);
+          } else if (key.name === "down") {
+            state.selectedPaletteIndex += 1;
+            clampPaletteSelection(state);
           } else if (key.name === "return" || key.name === "enter") {
-            try {
-              const parsed = parseTuiCommand(state.commandInput);
-              const action = toTuiCommandAction(parsed);
-              if (parsed.requiresConfirmation) {
-                state.confirmation = { action, typedValue: "" };
-                state.view = "confirm";
-                state.notice = `Preview: feature-inventor ${action.command.join(" ")}`;
-              } else {
-                await executeAction(action);
-                return;
-              }
-            } catch (error) {
-              state.notice = error instanceof Error ? error.message : String(error);
-            }
+            openSelectedPaletteCommand();
           } else if (isPrintableKeypressInput(input)) {
-            state.commandInput += input;
+            state.paletteQuery += input;
+            clampPaletteSelection(state);
           }
+          render(state);
+          return;
+        }
+
+        if (state.view === "command") {
+          if (key.name === "escape") openPalette(state);
+          else if (key.name === "backspace" || key.name === "delete") state.commandInput = state.commandInput.slice(0, -1);
+          else if (key.name === "return" || key.name === "enter") {
+            await previewCommand();
+            return;
+          } else if (isPrintableKeypressInput(input)) state.commandInput += input;
           render(state);
           return;
         }
@@ -204,8 +293,8 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
         if (state.view === "confirm") {
           if (key.name === "escape") {
             state.confirmation = null;
-            state.view = "dashboard";
-            state.notice = "Action cancelled.";
+            openPalette(state);
+            state.notice = "Command cancelled.";
           } else if (key.name === "backspace" || key.name === "delete") {
             if (state.confirmation) state.confirmation.typedValue = state.confirmation.typedValue.slice(0, -1);
           } else if (key.name === "return" || key.name === "enter") {
@@ -218,28 +307,32 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
           return;
         }
 
-        if (key.name === "d") {
-          state.view = "dashboard";
-          state.detail = null;
-        } else if (key.name === "c") {
-          openCommandCenter(state);
-        } else if (key.name === "g" && selectedRunId(state)) {
-          openCommandCenter(state, `run --runtime manus --run ${selectedRunId(state)}`);
-        } else if (key.name === "a" && selectedRunId(state)) {
-          openCommandCenter(state, `approve ${selectedRunId(state)} --reviewer NAME --note \"Reviewed scope and checks.\"`);
-        } else if (key.name === "s") {
-          openCommandCenter(state, "stop");
-        } else if (key.name === "r") {
-          state.view = "runs";
-          clampRunSelection(state);
-        } else if (key.name === "h" || input === "?") {
+        if (key.name === "/" || input === "/") {
+          openPalette(state);
+        } else if (key.name === "?" || input === "?") {
           state.view = "help";
         } else if (key.name === "u") {
           refresh(state, options);
-        } else if (key.name === "b") {
-          beginConfirmation(state, "index-build");
-        } else if (key.name === "p") {
-          beginConfirmation(state, "propose");
+        } else if (key.name === "d" || key.name === "escape") {
+          openHome(state);
+        } else if (key.name === "1" && state.view === "home") {
+          openWorkflow(state, "plan");
+        } else if (key.name === "2" && state.view === "home") {
+          openWorkflow(state, "govern");
+        } else if (key.name === "3" && state.view === "home") {
+          state.view = "runs";
+          clampRunSelection(state);
+        } else if (state.view === "workflow" && ["1", "2", "3", "4"].includes(key.name ?? "")) {
+          advanceWorkflow(key.name!);
+        } else if (key.name === "r") {
+          state.view = "runs";
+          clampRunSelection(state);
+        } else if (key.name === "a") {
+          openSelectedRunAction("approve");
+        } else if (key.name === "g") {
+          openSelectedRunAction("run");
+        } else if (key.name === "s") {
+          openSelectedRunAction("stop");
         } else if (key.name === "up" && state.view === "runs") {
           state.selectedRunIndex -= 1;
           clampRunSelection(state);
@@ -252,9 +345,6 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
             state.detail = options.dataSource.readRunDetail(runId);
             state.view = "detail";
           }
-        } else if (key.name === "escape") {
-          if (state.view === "detail") state.view = "runs";
-          else if (state.view !== "dashboard") state.view = "dashboard";
         }
         render(state);
       } finally {

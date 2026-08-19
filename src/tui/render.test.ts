@@ -36,11 +36,14 @@ const STATUS: StatusData = {
 
 function state(overrides: Partial<TuiState> = {}): TuiState {
   return {
-    view: "dashboard",
+    view: "home",
+    workflow: null,
     selectedRunIndex: 0,
+    selectedPaletteIndex: 0,
     snapshot: { status: STATUS, refreshedAt: "2026-08-17T00:00:00.000Z" },
     detail: null,
     confirmation: null,
+    paletteQuery: "",
     commandInput: "",
     notice: null,
     columns: 100,
@@ -52,34 +55,48 @@ function state(overrides: Partial<TuiState> = {}): TuiState {
 }
 
 describe("full-screen TUI renderer", () => {
-  it("renders a governed dashboard from the shared overview contract without color escape sequences", () => {
+  it("renders a calm progressive home with one next-safe-step and visible newcomer paths", () => {
     const frame = renderTuiFrame(state());
-    expect(frame).toContain("Feature Inventor");
-    expect(frame).toContain("Improve review ergonomics");
-    expect(frame).toContain("run-20260817-001");
-    expect(frame).toContain("approved by maintainer");
-    expect(frame).toContain("C opens the governed command center");
-    expect(frame).toContain("[G] Run selected");
-    expect(frame).toContain("[A] Approve selected");
-    expect(frame).toContain("[S] Stop");
+    expect(frame).toContain("Governed improvement, at a human pace.");
+    expect(frame).toContain("Plan an improvement");
+    expect(frame).toContain("Govern a run");
+    expect(frame).toContain("Review governed runs");
+    expect(frame).toContain("Find any command");
+    expect(frame).toContain("Check active work");
+    expect(frame).not.toContain("APPEND-ONLY EVENTS");
     expect(frame).not.toContain("\u001B[31m");
   });
 
-  it("renders selected governed runs and append-only run details without editing evidence", () => {
-    const runs = renderTuiFrame(state({ view: "runs" }));
-    expect(runs).toContain("> run-20260817-001");
-    expect(runs).toContain("Use Up/Down to select");
+  it("renders focused workflow and evidence views without exposing unrelated command density", () => {
+    const workflow = renderTuiFrame(state({ view: "workflow", workflow: "plan" }));
+    expect(workflow).toContain("PLAN AN IMPROVEMENT");
+    expect(workflow).toContain("Inspect the queue");
+    expect(workflow).toContain("Build context");
+    expect(workflow).toContain("Create a proposal");
 
     const detail = renderTuiFrame(state({
       view: "detail",
       detail: { run: RUN, events: [RUN.latestEvent] },
     }));
-    expect(detail).toContain("APPEND-ONLY EVENTS");
+    expect(detail).toContain("RECENT EVIDENCE");
     expect(detail).toContain("approval-recorded");
-    expect(detail).toContain("never edits journal evidence");
+    expect(detail).toContain("A approves");
   });
 
-  it("renders the exact typed phrase for local mutation confirmation and a compact fallback for small terminals", () => {
+  it("renders grouped searchable command discovery and a focused command editor", () => {
+    const palette = renderTuiFrame(state({ view: "palette", paletteQuery: "run" }));
+    expect(palette).toContain("COMMAND PALETTE");
+    expect(palette).toContain("Launch an approved run");
+    expect(palette).toContain("Watch or recover a run");
+    expect(palette).toContain("Request a stop");
+
+    const editor = renderTuiFrame(state({ view: "command", commandInput: "run --runtime manus --run RUN_ID" }));
+    expect(editor).toContain("COMMAND EDITOR");
+    expect(editor).toContain("run --runtime manus --run RUN_ID");
+    expect(editor).toContain("never a shell");
+  });
+
+  it("renders confirmation and compact fallback states with keyboard recovery guidance", () => {
     const confirm = renderTuiFrame(state({
       view: "confirm",
       confirmation: {
@@ -87,17 +104,12 @@ describe("full-screen TUI renderer", () => {
         typedValue: "CREATE",
       },
     }));
-    expect(confirm).toContain("CONFIRM COMMAND");
+    expect(confirm).toContain("READY TO EXECUTE");
     expect(confirm).toContain("CREATE PROPOSAL");
     expect(confirm).toContain("Esc cancels");
 
-    const commands = renderTuiFrame(state({ view: "command", commandInput: "run --runtime manus --run run-1" }));
-    expect(commands).toContain("GOVERNED COMMAND CENTER");
-    expect(commands).toContain("run --runtime manus --run run-1");
-    expect(commands).toContain("No shell syntax and no --cwd override");
-
     const compact = renderTuiFrame(state({ columns: 60, rows: 20 }));
-    expect(compact).toContain("resize to at least 80x24");
+    expect(compact).toContain("Resize to at least 80x24");
     expect(compact).toContain("feature-inventor overview");
   });
 });

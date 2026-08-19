@@ -24,14 +24,14 @@ Then initialize the target repository you want to govern. Run this from that tar
 feature-inventor init
 feature-inventor doctor
 feature-inventor overview
-feature-inventor tui # optional interactive dashboard
+feature-inventor tui # optional guided terminal workspace
 ```
 
 `init` writes an explicit local target contract, creates an empty operator roadmap only when absent, and prints the next safe steps. It does not start a runtime, create a proposal, change target application source, or schedule background work. For a fully scriptable setup, use `feature-inventor init --non-interactive --repository URL --default-branch BRANCH --goal TEXT --check COMMAND --format json`.
 
-`overview` is the official scriptable orientation command. It summarizes the current queue, recent governed runs, and the next safe action. It does not create a proposal or start a runtime. `tui` is an optional keyboard-first governed command center for interactive human terminals; it can hand off the full supported CLI lifecycle, including approval, run, stop, verification, review, and finalization, after command preview and any required typed confirmation. It never invokes a shell and never bypasses existing proposal, approval, evidence, or runtime policy checks. See the [full-screen TUI guide](docs/cli/FULL_SCREEN_TUI.md) for controls and boundaries. `doctor` is also non-mutating. It validates the target manifest, Git root and origin, current branch, workspace state, declared checks, and the manual scheduling default before any governed run begins.
+`overview` is the official scriptable orientation command. It summarizes the current queue, recent governed runs, and the next safe action. It does not create a proposal or start a runtime. `tui` is an optional keyboard-first workspace for interactive human terminals: its calm home shows one safe next step and visible planning, run-governance, and evidence paths; its searchable palette reveals the full advanced command surface only when needed. It can hand validated argv to the complete lifecycle after command preview and required typed confirmation. It never invokes a shell and never bypasses existing proposal, approval, evidence, or runtime policy checks. See the [full-screen TUI guide](docs/cli/FULL_SCREEN_TUI.md) for controls and boundaries. `doctor` is also non-mutating. It validates the target manifest, Git root and origin, current branch, workspace state, declared checks, and the manual scheduling default before any governed run begins.
 
-Run `feature-inventor help` for grouped examples, `feature-inventor help propose` for proposal guidance, `feature-inventor help approve` for the enforced reviewer gate, or `feature-inventor help tui` for the dashboard contract. The older `status` command remains available as a compatibility alias.
+Run `feature-inventor help` for grouped examples, `feature-inventor help propose` for proposal guidance, `feature-inventor help approve` for the enforced reviewer gate, or `feature-inventor help tui` for the guided workspace contract. The older `status` command remains available as a compatibility alias.
 
 ### Output, terminal, and repository controls
 
