@@ -108,6 +108,15 @@ export function isPrintableKeypressInput(input: unknown): input is string {
 }
 
 /**
+ * Windows and terminal emulators do not always provide `key.name` for Enter.
+ * Treat standard named keys, raw text payloads, and raw sequences as the same
+ * immediate transition key so a following navigation key is never required.
+ */
+export function isEnterKeypress(input: unknown, key: Key = {}): boolean {
+  return key.name === "return" || key.name === "enter" || input === "\r" || input === "\n" || key.sequence === "\r" || key.sequence === "\n";
+}
+
+/**
  * Starts the optional interactive workspace. The controller owns terminal
  * input and rendering only; all repository work remains in the established
  * command implementation supplied by the caller.
@@ -269,7 +278,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
           } else if (key.name === "down") {
             state.selectedPaletteIndex += 1;
             clampPaletteSelection(state);
-          } else if (key.name === "return" || key.name === "enter") {
+          } else if (isEnterKeypress(input, key)) {
             openSelectedPaletteCommand();
           } else if (isPrintableKeypressInput(input)) {
             state.paletteQuery += input;
@@ -282,7 +291,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
         if (state.view === "command") {
           if (key.name === "escape") openPalette(state);
           else if (key.name === "backspace" || key.name === "delete") state.commandInput = state.commandInput.slice(0, -1);
-          else if (key.name === "return" || key.name === "enter") {
+          else if (isEnterKeypress(input, key)) {
             await previewCommand();
             return;
           } else if (isPrintableKeypressInput(input)) state.commandInput += input;
@@ -297,7 +306,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
             state.notice = "Command cancelled.";
           } else if (key.name === "backspace" || key.name === "delete") {
             if (state.confirmation) state.confirmation.typedValue = state.confirmation.typedValue.slice(0, -1);
-          } else if (key.name === "return" || key.name === "enter") {
+          } else if (isEnterKeypress(input, key)) {
             await executeConfirmation();
             return;
           } else if (isPrintableKeypressInput(input) && state.confirmation) {
@@ -339,7 +348,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
         } else if (key.name === "down" && state.view === "runs") {
           state.selectedRunIndex += 1;
           clampRunSelection(state);
-        } else if ((key.name === "return" || key.name === "enter") && state.view === "runs") {
+        } else if (isEnterKeypress(input, key) && state.view === "runs") {
           const runId = selectedRunId(state);
           if (runId) {
             state.detail = options.dataSource.readRunDetail(runId);
