@@ -19,14 +19,121 @@ const READ_ONLY_TOP_LEVEL_COMMANDS = new Set([
 const READ_ONLY_INDEX_SUBCOMMANDS = new Set(["status", "report", "heatmap"]);
 const READ_ONLY_DOCS_SUBCOMMANDS = new Set(["validate"]);
 
-export const TUI_COMMAND_EXAMPLES = [
-  "run --runtime manus --run RUN_ID",
-  "stop",
-  "approve RUN_ID --reviewer NAME --note \"Reviewed scope and checks.\"",
-  "verify --run RUN_ID --check \"npm test\"",
-  "review --run RUN_ID",
-  "finalize --run RUN_ID",
-  "recover --run RUN_ID",
+export type TuiPaletteGroup = "Start here" | "Plan safely" | "Govern a run" | "Advanced";
+
+export interface TuiPaletteCommand {
+  id: string;
+  group: TuiPaletteGroup;
+  label: string;
+  description: string;
+  commandInput?: string;
+  destination?: "runs";
+}
+
+/**
+ * Ordered visible actions for the command palette. Templates make required
+ * values obvious; selecting one opens the focused command editor rather than
+ * executing a partially specified lifecycle command.
+ */
+export const TUI_COMMAND_CATALOG: readonly TuiPaletteCommand[] = [
+  {
+    id: "overview",
+    group: "Start here",
+    label: "Repository overview",
+    description: "See repository health, current work, and the next safe action.",
+    commandInput: "overview",
+  },
+  {
+    id: "doctor",
+    group: "Start here",
+    label: "Check prerequisites",
+    description: "Run a read-only repository, manifest, Git, and policy health check.",
+    commandInput: "doctor",
+  },
+  {
+    id: "runs",
+    group: "Start here",
+    label: "Review governed runs",
+    description: "Browse approval state, lifecycle status, and append-only evidence.",
+    destination: "runs",
+  },
+  {
+    id: "plan",
+    group: "Plan safely",
+    label: "Inspect planned improvements",
+    description: "Read the approved roadmap queue without starting work.",
+    commandInput: "plan",
+  },
+  {
+    id: "index-build",
+    group: "Plan safely",
+    label: "Build repository index",
+    description: "Create a commit-pinned local index before proposing a change.",
+    commandInput: "index build",
+  },
+  {
+    id: "propose",
+    group: "Plan safely",
+    label: "Create a governed proposal",
+    description: "Pin one planned change to a commit and policy snapshot. No runtime starts.",
+    commandInput: "propose",
+  },
+  {
+    id: "approve",
+    group: "Govern a run",
+    label: "Record human approval",
+    description: "Bind a reviewer decision and rationale to an immutable proposal.",
+    commandInput: "approve RUN_ID --reviewer NAME --note \"Reviewed scope and checks.\"",
+  },
+  {
+    id: "run",
+    group: "Govern a run",
+    label: "Launch an approved run",
+    description: "Start one proposal through a selected runtime after its approval gate passes.",
+    commandInput: "run --runtime manus --run RUN_ID",
+  },
+  {
+    id: "watch",
+    group: "Govern a run",
+    label: "Watch or recover a run",
+    description: "Observe one runtime lifecycle or recover durable evidence.",
+    commandInput: "watch --run RUN_ID",
+  },
+  {
+    id: "verify",
+    group: "Govern a run",
+    label: "Verify, review, and finalize",
+    description: "Record checks, inspect evidence, and complete a reviewed lifecycle.",
+    commandInput: "verify --run RUN_ID --check \"npm test\"",
+  },
+  {
+    id: "stop",
+    group: "Govern a run",
+    label: "Request a stop",
+    description: "Request a graceful stop; use --cancel only when cancellation is intended.",
+    commandInput: "stop",
+  },
+  {
+    id: "raw-command",
+    group: "Advanced",
+    label: "Enter any Feature Inventor command",
+    description: "Use the complete supported command surface with safe argv parsing and policy checks.",
+    commandInput: "",
+  },
+  {
+    id: "schedule",
+    group: "Advanced",
+    label: "Create a scheduler handoff",
+    description: "Write a proposal-pinned handoff without starting a scheduler.",
+    commandInput: "schedule handoff --run RUN_ID --runtime manus",
+  },
+  {
+    id: "cli-help",
+    group: "Advanced",
+    label: "Browse CLI help",
+    description: "Print the authoritative grouped command interface and examples.",
+    commandInput: "help",
+  },
 ] as const;
 
 export interface TuiParsedCommand {
@@ -120,15 +227,15 @@ export function parseTuiCommandInput(input: string): string[] {
 }
 
 /**
- * Validates a user-entered argv vector for the TUI command center. It accepts
- * Feature Inventor commands only and deliberately never invokes a shell.
+ * Validates a user-entered argv vector for the TUI. It accepts Feature
+ * Inventor commands only and deliberately never invokes a shell.
  */
 export function parseTuiCommand(commandInput: string): TuiParsedCommand {
   const command = parseTuiCommandInput(commandInput);
   const primary = command[0];
-  if (primary === "tui") throw new Error("Nested TUI sessions are not supported. Use the current dashboard or press Q to exit.");
+  if (primary === "tui") throw new Error("Nested TUI sessions are not supported. Use the current workspace or press Q to exit.");
   if (!COMMAND_NAMES.includes(primary as (typeof COMMAND_NAMES)[number])) {
-    throw new Error(`Unsupported Feature Inventor command: ${primary}. Use H for supported examples.`);
+    throw new Error(`Unsupported Feature Inventor command: ${primary}. Use the palette to discover supported actions.`);
   }
   if (hasDisallowedToken(command)) {
     throw new Error("The TUI does not accept shell operators or --cwd. It always runs in the current target repository.");
@@ -145,6 +252,15 @@ export function parseTuiCommand(commandInput: string): TuiParsedCommand {
       ? "This command may create evidence, start or stop work, or change local lifecycle state. Existing CLI policy checks still apply."
       : "This command uses the existing Feature Inventor CLI in read-only inspection mode.",
   };
+}
+
+export function filterTuiCommandCatalog(query: string): TuiPaletteCommand[] {
+  const normalized = query.trim().toLowerCase();
+  if (normalized.length === 0) return [...TUI_COMMAND_CATALOG];
+  return TUI_COMMAND_CATALOG.filter((command) => [command.label, command.description, command.group, command.commandInput ?? ""]
+    .join(" ")
+    .toLowerCase()
+    .includes(normalized));
 }
 
 export function toTuiCommandAction(parsed: TuiParsedCommand): TuiMutationAction {

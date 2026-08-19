@@ -1,7 +1,8 @@
 import type { GovernedRunStatus, StatusData } from "../cli.js";
 import type { RunJournalEvent } from "../run-journal.js";
 
-export type TuiView = "dashboard" | "runs" | "detail" | "help" | "command" | "confirm";
+export type TuiView = "home" | "workflow" | "runs" | "detail" | "palette" | "command" | "help" | "confirm";
+export type TuiWorkflow = "plan" | "govern";
 
 export interface TuiRunDetail {
   run: GovernedRunStatus;
@@ -33,10 +34,13 @@ export interface TuiConfirmation {
 
 export interface TuiState {
   view: TuiView;
+  workflow: TuiWorkflow | null;
   selectedRunIndex: number;
+  selectedPaletteIndex: number;
   snapshot: TuiSnapshot;
   detail: TuiRunDetail | null;
   confirmation: TuiConfirmation | null;
+  paletteQuery: string;
   commandInput: string;
   notice: string | null;
   columns: number;

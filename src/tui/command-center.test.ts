@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { COMMAND_NAMES } from "../cli/command-spec.js";
-import { parseTuiCommand, parseTuiCommandInput, toTuiCommandAction } from "./command-center.js";
+import { filterTuiCommandCatalog, parseTuiCommand, parseTuiCommandInput, toTuiCommandAction } from "./command-center.js";
 
 describe("TUI governed command center", () => {
   it("splits quoted values into an argv vector without shell evaluation", () => {
@@ -26,6 +26,16 @@ describe("TUI governed command center", () => {
     const stop = parseTuiCommand("stop --cancel");
     expect(stop.requiresConfirmation).toBe(true);
     expect(stop.confirmationPhrase).toBe("EXECUTE STOP");
+  });
+
+  it("groups discoverable commands for newcomers while keeping a raw advanced-command route", () => {
+    const starter = filterTuiCommandCatalog("");
+    expect(starter.map((command) => command.group)).toContain("Start here");
+    expect(starter.map((command) => command.group)).toContain("Plan safely");
+    expect(starter.map((command) => command.group)).toContain("Govern a run");
+    expect(starter.find((command) => command.id === "raw-command")?.group).toBe("Advanced");
+    expect(filterTuiCommandCatalog("approval").map((command) => command.id)).toContain("approve");
+    expect(filterTuiCommandCatalog("stop").map((command) => command.id)).toContain("stop");
   });
 
   it("accepts every declared top-level command name for the command center while leaving detailed CLI validation intact", () => {

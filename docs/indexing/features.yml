@@ -111,8 +111,8 @@ features:
       - external-runtime
 
   - id: full-screen-tui
-    name: Full-screen terminal dashboard
-    intent: Provide an optional keyboard-first governed-work dashboard while preserving explicit CLI authorization for high-impact actions.
+    name: Full-screen terminal workspace
+    intent: Provide an optional calm keyboard-first governed-work workspace with progressive newcomer paths, searchable advanced discovery, and explicit CLI authorization for high-impact actions.
     entryPoints:
       - src/cli.ts#runTui
     primaryPaths:
@@ -231,7 +231,7 @@ flows:
         role: shared-governed-orchestration
 
   - id: full-screen-tui
-    name: Full-screen terminal dashboard
+    name: Full-screen terminal workspace
     startsAt:
       - src/cli.ts#runTui
     steps:
@@ -242,7 +242,7 @@ flows:
       - source: src/tui/command-center.ts#parseTuiCommand
         role: argv-validation-and-confirmation-policy
       - source: src/tui/render.ts#renderTuiFrame
-        role: read-only-presentation
+        role: progressive-workspace-presentation
       - source: src/cli.ts#getStatusData
         role: shared-governance-state
 
