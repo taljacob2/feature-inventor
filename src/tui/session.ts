@@ -1,9 +1,9 @@
-import { emitKeypressEvents } from "node:readline";
 import { filterTuiCommandCatalog, parseTuiCommand, toTuiCommandAction } from "./command-center.js";
 import { renderTuiFrame } from "./render.js";
 import { type TuiLaunchOptions, type TuiMutationAction, type TuiState, type TuiWorkflow } from "./types.js";
 
 type Key = { name?: string; ctrl?: boolean; sequence?: string };
+export type TuiRawKeypress = { input: string | undefined; key: Key };
 
 function dimensions(): { columns: number; rows: number } {
   return {
@@ -99,33 +99,77 @@ function exitAlternateScreen(): void {
 }
 
 /**
- * Node keypress events can omit their text payload on Windows for control,
- * composition, and terminal-specific events. Treat only one printable string
- * as text input; every other payload is intentionally a harmless no-op.
+ * Treat only one printable character as text input. Control and composition
+ * input is deliberately ignored by the command and confirmation editors.
  */
 export function isPrintableKeypressInput(input: unknown): input is string {
   return typeof input === "string" && input.length === 1 && input >= " " && input !== "\u007f";
 }
 
-/**
- * Windows and terminal emulators do not always provide `key.name` for Enter.
- * Treat standard named keys, raw text payloads, and raw sequences as the same
- * immediate transition key so a following navigation key is never required.
- */
 export function isEnterKeypress(input: unknown, key: Key = {}): boolean {
   return key.name === "return" || key.name === "enter" || input === "\r" || input === "\n" || key.sequence === "\r" || key.sequence === "\n";
 }
 
+function toInputString(chunk: unknown): string {
+  if (typeof chunk === "string") return chunk;
+  if (Buffer.isBuffer(chunk)) return chunk.toString("utf8");
+  return "";
+}
+
 /**
- * Some Windows raw-mode terminals emit Enter through stdin data without a
- * usable keypress object. The controller uses this only as a deferred palette
- * fallback after normal keypress processing has had an opportunity to act.
+ * Decodes raw stdin exactly once instead of relying on terminal-specific
+ * readline keypress events. This keeps Enter, arrows, escape, backspace,
+ * Ctrl+C, and ordinary text deterministic across PowerShell and Unix TTYs.
  */
-export function isRawEnterInput(chunk: unknown): boolean {
-  if (typeof chunk === "string") return chunk === "\r" || chunk === "\n" || chunk === "\r\n";
-  if (!Buffer.isBuffer(chunk)) return false;
-  return (chunk.length === 1 && (chunk[0] === 0x0d || chunk[0] === 0x0a))
-    || (chunk.length === 2 && chunk[0] === 0x0d && chunk[1] === 0x0a);
+export function decodeTuiRawInput(chunk: unknown): TuiRawKeypress[] {
+  const source = toInputString(chunk);
+  const events: TuiRawKeypress[] = [];
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index]!;
+    const remainder = source.slice(index);
+
+    if (remainder.startsWith("\u001b[A")) {
+      events.push({ input: undefined, key: { name: "up", sequence: "\u001b[A" } });
+      index += 2;
+      continue;
+    }
+    if (remainder.startsWith("\u001b[B")) {
+      events.push({ input: undefined, key: { name: "down", sequence: "\u001b[B" } });
+      index += 2;
+      continue;
+    }
+    if (remainder.startsWith("\u001b[3~")) {
+      events.push({ input: undefined, key: { name: "delete", sequence: "\u001b[3~" } });
+      index += 3;
+      continue;
+    }
+    if (character === "\r") {
+      if (source[index + 1] === "\n") index += 1;
+      events.push({ input: "\r", key: { name: "return", sequence: "\r" } });
+      continue;
+    }
+    if (character === "\n") {
+      events.push({ input: "\n", key: { name: "enter", sequence: "\n" } });
+      continue;
+    }
+    if (character === "\u0003") {
+      events.push({ input: undefined, key: { name: "c", ctrl: true, sequence: "\u0003" } });
+      continue;
+    }
+    if (character === "\u007f" || character === "\b") {
+      events.push({ input: undefined, key: { name: "backspace", sequence: character } });
+      continue;
+    }
+    if (character === "\u001b") {
+      events.push({ input: undefined, key: { name: "escape", sequence: "\u001b" } });
+      continue;
+    }
+
+    events.push({ input: character, key: { name: character, sequence: character } });
+  }
+
+  return events;
 }
 
 /**
@@ -145,7 +189,6 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
   let resolveExit: (() => void) | null = null;
 
   const cleanup = (): void => {
-    stdin.off("keypress", onKeypress);
     stdin.off("data", onData);
     process.stdout.off("resize", onResize);
     if (stdin.isRaw) stdin.setRawMode(false);
@@ -174,7 +217,6 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
     state.notice = `Running: feature-inventor ${action.command.join(" ")}`;
     render(state);
 
-    stdin.off("keypress", onKeypress);
     stdin.off("data", onData);
     process.stdout.off("resize", onResize);
     if (stdin.isRaw) stdin.setRawMode(false);
@@ -188,10 +230,8 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
     } finally {
       if (!active) return;
       enterAlternateScreen();
-      emitKeypressEvents(stdin);
       stdin.setRawMode(true);
       stdin.resume();
-      stdin.on("keypress", onKeypress);
       stdin.on("data", onData);
       process.stdout.on("resize", onResize);
       refresh(state, options);
@@ -245,19 +285,10 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
       return;
     }
     if (action === "approve") {
-      openCommandEditor(state, `approve ${runId} --reviewer NAME --note \"Reviewed scope and checks.\"`);
+      openCommandEditor(state, `approve ${runId} --reviewer NAME --note "Reviewed scope and checks."`);
       return;
     }
     openCommandEditor(state, `run --runtime manus --run ${runId}`);
-  };
-
-  const onData = (chunk: unknown): void => {
-    if (!isRawEnterInput(chunk)) return;
-    setImmediate(() => {
-      if (!active || handling || state.view !== "palette") return;
-      openSelectedPaletteCommand();
-      render(state);
-    });
   };
 
   const advanceWorkflow = (step: string): void => {
@@ -277,109 +308,118 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
     }
   };
 
-  const onKeypress = (input: string | undefined, key: Key = {}): void => {
+  const handleKeypress = async (input: string | undefined, key: Key): Promise<void> => {
+    if (key.ctrl && key.name === "c") {
+      finish();
+      return;
+    }
+    if (key.name === "q" && state.view !== "command" && state.view !== "confirm") {
+      finish();
+      return;
+    }
+
+    if (state.view === "palette") {
+      if (key.name === "escape") openHome(state);
+      else if (key.name === "backspace" || key.name === "delete") {
+        state.paletteQuery = state.paletteQuery.slice(0, -1);
+        clampPaletteSelection(state);
+      } else if (key.name === "up") {
+        state.selectedPaletteIndex -= 1;
+        clampPaletteSelection(state);
+      } else if (key.name === "down") {
+        state.selectedPaletteIndex += 1;
+        clampPaletteSelection(state);
+      } else if (isEnterKeypress(input, key)) {
+        openSelectedPaletteCommand();
+      } else if (isPrintableKeypressInput(input)) {
+        state.paletteQuery += input;
+        clampPaletteSelection(state);
+      }
+      render(state);
+      return;
+    }
+
+    if (state.view === "command") {
+      if (key.name === "escape") openPalette(state);
+      else if (key.name === "backspace" || key.name === "delete") state.commandInput = state.commandInput.slice(0, -1);
+      else if (isEnterKeypress(input, key)) {
+        await previewCommand();
+        return;
+      } else if (isPrintableKeypressInput(input)) state.commandInput += input;
+      render(state);
+      return;
+    }
+
+    if (state.view === "confirm") {
+      if (key.name === "escape") {
+        state.confirmation = null;
+        openPalette(state);
+        state.notice = "Command cancelled.";
+      } else if (key.name === "backspace" || key.name === "delete") {
+        if (state.confirmation) state.confirmation.typedValue = state.confirmation.typedValue.slice(0, -1);
+      } else if (isEnterKeypress(input, key)) {
+        await executeConfirmation();
+        return;
+      } else if (isPrintableKeypressInput(input) && state.confirmation) {
+        state.confirmation.typedValue += input;
+      }
+      render(state);
+      return;
+    }
+
+    if (key.name === "/" || input === "/") {
+      openPalette(state);
+    } else if (key.name === "?" || input === "?") {
+      state.view = "help";
+    } else if (key.name === "u") {
+      refresh(state, options);
+    } else if (key.name === "d" || key.name === "escape") {
+      openHome(state);
+    } else if (key.name === "1" && state.view === "home") {
+      openWorkflow(state, "plan");
+    } else if (key.name === "2" && state.view === "home") {
+      openWorkflow(state, "govern");
+    } else if (key.name === "3" && state.view === "home") {
+      state.view = "runs";
+      clampRunSelection(state);
+    } else if (state.view === "workflow" && ["1", "2", "3", "4"].includes(key.name ?? "")) {
+      advanceWorkflow(key.name!);
+    } else if (key.name === "r") {
+      state.view = "runs";
+      clampRunSelection(state);
+    } else if (key.name === "a") {
+      openSelectedRunAction("approve");
+    } else if (key.name === "g") {
+      openSelectedRunAction("run");
+    } else if (key.name === "s") {
+      openSelectedRunAction("stop");
+    } else if (key.name === "up" && state.view === "runs") {
+      state.selectedRunIndex -= 1;
+      clampRunSelection(state);
+    } else if (key.name === "down" && state.view === "runs") {
+      state.selectedRunIndex += 1;
+      clampRunSelection(state);
+    } else if (isEnterKeypress(input, key) && state.view === "runs") {
+      const runId = selectedRunId(state);
+      if (runId) {
+        state.detail = options.dataSource.readRunDetail(runId);
+        state.view = "detail";
+      }
+    }
+    render(state);
+  };
+
+  const onData = (chunk: unknown): void => {
     if (handling || !active) return;
+    const events = decodeTuiRawInput(chunk);
+    if (events.length === 0) return;
     handling = true;
     void (async () => {
       try {
-        if (key.ctrl && key.name === "c") {
-          finish();
-          return;
+        for (const event of events) {
+          if (!active) break;
+          await handleKeypress(event.input, event.key);
         }
-        if (key.name === "q" && state.view !== "command" && state.view !== "confirm") {
-          finish();
-          return;
-        }
-
-        if (state.view === "palette") {
-          if (key.name === "escape") openHome(state);
-          else if (key.name === "backspace" || key.name === "delete") {
-            state.paletteQuery = state.paletteQuery.slice(0, -1);
-            clampPaletteSelection(state);
-          } else if (key.name === "up") {
-            state.selectedPaletteIndex -= 1;
-            clampPaletteSelection(state);
-          } else if (key.name === "down") {
-            state.selectedPaletteIndex += 1;
-            clampPaletteSelection(state);
-          } else if (isEnterKeypress(input, key)) {
-            openSelectedPaletteCommand();
-          } else if (isPrintableKeypressInput(input)) {
-            state.paletteQuery += input;
-            clampPaletteSelection(state);
-          }
-          render(state);
-          return;
-        }
-
-        if (state.view === "command") {
-          if (key.name === "escape") openPalette(state);
-          else if (key.name === "backspace" || key.name === "delete") state.commandInput = state.commandInput.slice(0, -1);
-          else if (isEnterKeypress(input, key)) {
-            await previewCommand();
-            return;
-          } else if (isPrintableKeypressInput(input)) state.commandInput += input;
-          render(state);
-          return;
-        }
-
-        if (state.view === "confirm") {
-          if (key.name === "escape") {
-            state.confirmation = null;
-            openPalette(state);
-            state.notice = "Command cancelled.";
-          } else if (key.name === "backspace" || key.name === "delete") {
-            if (state.confirmation) state.confirmation.typedValue = state.confirmation.typedValue.slice(0, -1);
-          } else if (isEnterKeypress(input, key)) {
-            await executeConfirmation();
-            return;
-          } else if (isPrintableKeypressInput(input) && state.confirmation) {
-            state.confirmation.typedValue += input;
-          }
-          render(state);
-          return;
-        }
-
-        if (key.name === "/" || input === "/") {
-          openPalette(state);
-        } else if (key.name === "?" || input === "?") {
-          state.view = "help";
-        } else if (key.name === "u") {
-          refresh(state, options);
-        } else if (key.name === "d" || key.name === "escape") {
-          openHome(state);
-        } else if (key.name === "1" && state.view === "home") {
-          openWorkflow(state, "plan");
-        } else if (key.name === "2" && state.view === "home") {
-          openWorkflow(state, "govern");
-        } else if (key.name === "3" && state.view === "home") {
-          state.view = "runs";
-          clampRunSelection(state);
-        } else if (state.view === "workflow" && ["1", "2", "3", "4"].includes(key.name ?? "")) {
-          advanceWorkflow(key.name!);
-        } else if (key.name === "r") {
-          state.view = "runs";
-          clampRunSelection(state);
-        } else if (key.name === "a") {
-          openSelectedRunAction("approve");
-        } else if (key.name === "g") {
-          openSelectedRunAction("run");
-        } else if (key.name === "s") {
-          openSelectedRunAction("stop");
-        } else if (key.name === "up" && state.view === "runs") {
-          state.selectedRunIndex -= 1;
-          clampRunSelection(state);
-        } else if (key.name === "down" && state.view === "runs") {
-          state.selectedRunIndex += 1;
-          clampRunSelection(state);
-        } else if (isEnterKeypress(input, key) && state.view === "runs") {
-          const runId = selectedRunId(state);
-          if (runId) {
-            state.detail = options.dataSource.readRunDetail(runId);
-            state.view = "detail";
-          }
-        }
-        render(state);
       } finally {
         handling = false;
       }
@@ -387,10 +427,8 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
   };
 
   enterAlternateScreen();
-  emitKeypressEvents(stdin);
   stdin.setRawMode(true);
   stdin.resume();
-  stdin.on("keypress", onKeypress);
   stdin.on("data", onData);
   process.stdout.on("resize", onResize);
   render(state);
