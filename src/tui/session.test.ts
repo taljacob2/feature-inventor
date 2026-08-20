@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeTuiRawInput, isEnterKeypress, isPrintableKeypressInput } from "./session.js";
+import { decodeTuiRawInput, decodeTuiRawInputChunk, isEnterKeypress, isPrintableKeypressInput } from "./session.js";
 
 describe("TUI raw terminal input", () => {
   it("ignores undefined composition-like payloads without treating them as confirmation text", () => {
@@ -42,5 +42,16 @@ describe("TUI raw terminal input", () => {
     expect(decodeTuiRawInput("\u001b")).toEqual([{ input: undefined, key: { name: "escape", sequence: "\u001b" } }]);
     expect(decodeTuiRawInput("overview").map((event) => event.input).join("")).toBe("overview");
     expect(decodeTuiRawInput("\u0003")).toEqual([{ input: undefined, key: { name: "c", ctrl: true, sequence: "\u0003" } }]);
+  });
+
+  it("buffers a split Escape-plus-left-arrow sequence instead of cancelling the command editor", () => {
+    const prefix = decodeTuiRawInputChunk("\u001b");
+    expect(prefix).toEqual({ events: [], remainder: "\u001b" });
+
+    const completed = decodeTuiRawInputChunk("[D", prefix.remainder);
+    expect(completed).toEqual({
+      events: [{ input: undefined, key: { name: "left", sequence: "\u001b[D" } }],
+      remainder: "",
+    });
   });
 });

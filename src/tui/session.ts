@@ -121,28 +121,49 @@ function toInputString(chunk: unknown): string {
  * readline keypress events. This keeps Enter, arrows, escape, backspace,
  * Ctrl+C, and ordinary text deterministic across PowerShell and Unix TTYs.
  */
-export function decodeTuiRawInput(chunk: unknown): TuiRawKeypress[] {
-  const source = toInputString(chunk);
+export type TuiRawDecodeResult = { events: TuiRawKeypress[]; remainder: string };
+
+/**
+ * Decodes a raw data chunk while retaining incomplete ANSI escape prefixes.
+ * PowerShell can split an arrow sequence such as ESC [ D across data events;
+ * callers pass `remainder` into the next call instead of treating ESC as a
+ * standalone cancellation event prematurely.
+ */
+export function decodeTuiRawInputChunk(chunk: unknown, remainder = "", flush = false): TuiRawDecodeResult {
+  const source = `${remainder}${toInputString(chunk)}`;
   const events: TuiRawKeypress[] = [];
 
   for (let index = 0; index < source.length; index += 1) {
     const character = source[index]!;
-    const remainder = source.slice(index);
+    const remaining = source.slice(index);
 
-    if (remainder.startsWith("\u001b[A")) {
+    if (remaining.startsWith("\u001b[A")) {
       events.push({ input: undefined, key: { name: "up", sequence: "\u001b[A" } });
       index += 2;
       continue;
     }
-    if (remainder.startsWith("\u001b[B")) {
+    if (remaining.startsWith("\u001b[B")) {
       events.push({ input: undefined, key: { name: "down", sequence: "\u001b[B" } });
       index += 2;
       continue;
     }
-    if (remainder.startsWith("\u001b[3~")) {
+    if (remaining.startsWith("\u001b[C")) {
+      events.push({ input: undefined, key: { name: "right", sequence: "\u001b[C" } });
+      index += 2;
+      continue;
+    }
+    if (remaining.startsWith("\u001b[D")) {
+      events.push({ input: undefined, key: { name: "left", sequence: "\u001b[D" } });
+      index += 2;
+      continue;
+    }
+    if (remaining.startsWith("\u001b[3~")) {
       events.push({ input: undefined, key: { name: "delete", sequence: "\u001b[3~" } });
       index += 3;
       continue;
+    }
+    if (!flush && (remaining === "\u001b" || remaining === "\u001b[" || remaining === "\u001b[3")) {
+      return { events, remainder: remaining };
     }
     if (character === "\r") {
       if (source[index + 1] === "\n") index += 1;
@@ -169,7 +190,15 @@ export function decodeTuiRawInput(chunk: unknown): TuiRawKeypress[] {
     events.push({ input: character, key: { name: character, sequence: character } });
   }
 
-  return events;
+  return { events, remainder: "" };
+}
+
+/**
+ * Test-friendly complete-input decoder. Runtime input should use the buffered
+ * chunk decoder above to avoid splitting an ANSI escape sequence.
+ */
+export function decodeTuiRawInput(chunk: unknown): TuiRawKeypress[] {
+  return decodeTuiRawInputChunk(chunk, "", true).events;
 }
 
 /**
@@ -187,8 +216,17 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
   let active = true;
   let handling = false;
   let resolveExit: (() => void) | null = null;
+  let inputRemainder = "";
+  let escapeFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  const queuedEvents: TuiRawKeypress[] = [];
+
+  const clearEscapeFlushTimer = (): void => {
+    if (escapeFlushTimer) clearTimeout(escapeFlushTimer);
+    escapeFlushTimer = null;
+  };
 
   const cleanup = (): void => {
+    clearEscapeFlushTimer();
     stdin.off("data", onData);
     process.stdout.off("resize", onResize);
     if (stdin.isRaw) stdin.setRawMode(false);
@@ -210,6 +248,9 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
   };
 
   const executeAction = async (action: TuiMutationAction): Promise<void> => {
+    clearEscapeFlushTimer();
+    inputRemainder = "";
+    queuedEvents.length = 0;
     state.confirmation = null;
     state.commandInput = "";
     state.view = "home";
@@ -344,6 +385,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
       else if (key.name === "backspace" || key.name === "delete") state.commandInput = state.commandInput.slice(0, -1);
       else if (isEnterKeypress(input, key)) {
         await previewCommand();
+        if (active) render(state);
         return;
       } else if (isPrintableKeypressInput(input)) state.commandInput += input;
       render(state);
@@ -359,6 +401,7 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
         if (state.confirmation) state.confirmation.typedValue = state.confirmation.typedValue.slice(0, -1);
       } else if (isEnterKeypress(input, key)) {
         await executeConfirmation();
+        if (active) render(state);
         return;
       } else if (isPrintableKeypressInput(input) && state.confirmation) {
         state.confirmation.typedValue += input;
@@ -409,21 +452,44 @@ export async function launchTui(options: TuiLaunchOptions): Promise<void> {
     render(state);
   };
 
-  const onData = (chunk: unknown): void => {
-    if (handling || !active) return;
-    const events = decodeTuiRawInput(chunk);
-    if (events.length === 0) return;
+  const drainQueuedEvents = (): void => {
+    if (handling || !active || queuedEvents.length === 0) return;
     handling = true;
     void (async () => {
       try {
-        for (const event of events) {
-          if (!active) break;
+        while (active && queuedEvents.length > 0) {
+          const event = queuedEvents.shift()!;
           await handleKeypress(event.input, event.key);
         }
       } finally {
         handling = false;
+        if (active && queuedEvents.length > 0) drainQueuedEvents();
       }
     })();
+  };
+
+  const flushIncompleteEscape = (): void => {
+    escapeFlushTimer = null;
+    if (!active || inputRemainder.length === 0) return;
+    const decoded = decodeTuiRawInputChunk("", inputRemainder, true);
+    inputRemainder = decoded.remainder;
+    queuedEvents.push(...decoded.events);
+    drainQueuedEvents();
+  };
+
+  const scheduleEscapeFlush = (): void => {
+    clearEscapeFlushTimer();
+    escapeFlushTimer = setTimeout(flushIncompleteEscape, 32);
+  };
+
+  const onData = (chunk: unknown): void => {
+    if (!active) return;
+    const decoded = decodeTuiRawInputChunk(chunk, inputRemainder);
+    inputRemainder = decoded.remainder;
+    queuedEvents.push(...decoded.events);
+    if (inputRemainder.length > 0) scheduleEscapeFlush();
+    else clearEscapeFlushTimer();
+    drainQueuedEvents();
   };
 
   enterAlternateScreen();
